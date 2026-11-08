@@ -13,6 +13,31 @@
   var H264_PROFILES = { h264_high: '64', h264_main: '4d', h264_baseline: '42' };
 
   function native() { return window.CloudPlayNative; }
+
+  // Look like regular Chrome rather than an in-app WebView (some Xbox features check this).
+  try {
+    var uad = navigator.userAgentData;
+    if (uad && uad.brands && uad.brands.some(function (b) { return /webview/i.test(b.brand); })) {
+      var ver = (navigator.userAgent.match(/Chrome\/(\d+)/) || [])[1] || '130';
+      var brands = [{ brand: 'Chromium', version: ver }, { brand: 'Google Chrome', version: ver },
+        { brand: 'Not?A_Brand', version: '99' }];
+      var fake = {
+        brands: brands, mobile: uad.mobile, platform: uad.platform,
+        getHighEntropyValues: function (hints) {
+          return uad.getHighEntropyValues(hints).then(function (r) {
+            r.brands = brands;
+            if (r.fullVersionList) {
+              var full = (navigator.userAgent.match(/Chrome\/([\d.]+)/) || [])[1] || ver;
+              r.fullVersionList = brands.map(function (b) { return { brand: b.brand, version: b.brand.indexOf('Not') === 0 ? '99.0.0.0' : full }; });
+            }
+            return r;
+          });
+        },
+        toJSON: function () { return { brands: brands, mobile: uad.mobile, platform: uad.platform }; }
+      };
+      Object.defineProperty(navigator, 'userAgentData', { configurable: true, get: function () { return fake; } });
+    }
+  } catch (e) {}
   function onReady(fn) {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
     else fn();
@@ -34,13 +59,97 @@
     return [new Request(input, { body: body }), init];
   }
 
+  // ------------------------------------------------------------ Remote Play
+  // Console streaming ("xhome"). Approach adapted from Better xCloud (MIT, redphx):
+  // report a desktop browser, and add the console's own addresses as ICE candidates
+  // so the stream can connect directly to the Xbox.
+  var consoleAddrs = {};
+
+  function isXhome(url) {
+    return url.indexOf('/sessions/home') >= 0 || url.indexOf('xhome.') >= 0 ||
+      (location.pathname.indexOf('/play/consoles/launch/') >= 0 && /\/inputconfigs$/.test(url.split('?')[0]));
+  }
+
+  function deviceInfo() {
+    var os = OS_NAMES[C.resolution] || 'windows';
+    return JSON.stringify({
+      appInfo: { env: { clientAppId: location.host, clientAppType: 'browser', clientAppVersion: '26.1.97',
+        clientSdkVersion: '10.3.7', httpEnvironment: 'prod', sdkInstallId: '' } },
+      dev: {
+        os: { name: os, ver: '22631.2715', platform: 'desktop' },
+        hw: { make: 'Microsoft', model: 'unknown', sdktype: 'web' },
+        browser: { browserName: 'chrome', browserVersion: '140.0.3485.54' },
+        displayInfo: { dimensions: { widthInPixels: 4096, heightInPixels: 2160 }, pixelDensity: { dpiX: 1, dpiY: 1 } }
+      }
+    });
+  }
+
+  function patchCandidates(list) {
+    var re = /a=candidate:(\d+) (\d+) UDP (\d+) ([^\s]+) (\d+) (.*)/;
+    var out = [], n = 1;
+    function cand(c) { return { candidate: c, messageType: 'iceCandidate', sdpMLineIndex: '0', sdpMid: '0' }; }
+    list.forEach(function (item) {
+      var m = re.exec(item.candidate || '');
+      if (!m) return;
+      out.push(cand('a=candidate:' + n + ' 1 UDP ' + (n === 1 ? 2130706431 : 1) + ' ' + m[4] + ' ' + m[5] + ' ' + m[6]));
+      n++;
+    });
+    Object.keys(consoleAddrs).forEach(function (ip) {
+      consoleAddrs[ip].forEach(function (port) {
+        out.push(cand('a=candidate:' + (out.length + 1) + ' 1 UDP 1 ' + ip + ' ' + port + ' typ host'));
+      });
+    });
+    out.push(cand('a=end-of-candidates'));
+    return out;
+  }
+
+  function jsonResponse(res, obj) {
+    var h = new Headers(res.headers);
+    h.delete('content-length');
+    h.delete('content-encoding');
+    return new Response(JSON.stringify(obj), { status: res.status, statusText: res.statusText, headers: h });
+  }
+
+  async function handleXhome(input, init, url, path) {
+    var req = new Request(input, init);
+    var headers = new Headers(req.headers);
+    headers.set('x-ms-device-info', deviceInfo());
+    var opts = { method: req.method, headers: headers };
+    if (req.method !== 'GET' && req.method !== 'HEAD') opts.body = await req.clone().text();
+    var res = await origFetch(new Request(url, opts));
+
+    try {
+      if (url.indexOf('/configuration') >= 0 && res.ok) {
+        var cfg = await res.clone().json(), d = cfg.serverDetails || {};
+        consoleAddrs = {};
+        [['ipAddress', 'port'], ['ipV4Address', 'ipV4Port'], ['ipV6Address', 'ipV6Port']].forEach(function (p) {
+          if (!d[p[0]]) return;
+          var ports = [];
+          if (d[p[1]]) ports.push(d[p[1]]);
+          if (ports.indexOf(9002) < 0) ports.push(9002);
+          consoleAddrs[d[p[0]]] = ports;
+        });
+      } else if (/\/ice$/.test(path) && req.method === 'GET' && res.ok) {
+        var text = await res.clone().text();
+        if (text.length) {
+          var obj = JSON.parse(text);
+          obj.exchangeResponse = JSON.stringify(patchCandidates(JSON.parse(obj.exchangeResponse)));
+          return jsonResponse(res, obj);
+        }
+      }
+    } catch (e) {}
+    return res;
+  }
+
   if (!BX) window.fetch = async function (input, init) {
     var url = typeof input === 'string' ? input : (input && input.url) || String(input);
     var path = url.split('?')[0];
 
+    if (isXhome(url)) return handleXhome(input, init, url, path);
+
     // Stream resolution for cloud games and Remote Play: the server picks quality
     // from the client's reported OS.
-    if (/\/sessions\/(cloud|home)\/play$/.test(path) && OS_NAMES[C.resolution]) {
+    if (/\/sessions\/cloud\/play$/.test(path) && OS_NAMES[C.resolution]) {
       try {
         var raw = await readBody(input, init);
         if (raw) {

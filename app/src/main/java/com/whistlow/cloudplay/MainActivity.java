@@ -34,6 +34,8 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.preference.PreferenceManager;
 import androidx.webkit.ScriptHandler;
+import androidx.webkit.UserAgentMetadata;
+import androidx.webkit.WebSettingsCompat;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
 
@@ -110,7 +112,9 @@ public class MainActivity extends AppCompatActivity {
         s.setUseWideViewPort(true);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
         s.setSupportMultipleWindows(false); // keep sign-in popups in this view
-        s.setUserAgentString(s.getUserAgentString().replace("; wv", ""));
+        // Present as regular Chrome: drop the WebView markers from the UA string and brand list.
+        s.setUserAgentString(s.getUserAgentString().replace("; wv", "").replace("Version/4.0 ", ""));
+        applyChromeBrands(s);
 
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
@@ -160,6 +164,33 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean useBetterXcloud() {
         return "betterxcloud".equals(prefs().getString("engine", "betterxcloud"));
+    }
+
+    private static void applyChromeBrands(WebSettings s) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) return;
+        try {
+            UserAgentMetadata cur = WebSettingsCompat.getUserAgentMetadata(s);
+            java.util.List<UserAgentMetadata.BrandVersion> list = new java.util.ArrayList<>();
+            String major = null, full = null;
+            for (UserAgentMetadata.BrandVersion b : cur.getBrandVersionList()) {
+                if (b.getBrand().toLowerCase().contains("webview")) {
+                    major = b.getMajorVersion();
+                    full = b.getFullVersion();
+                } else {
+                    list.add(b);
+                    if (major == null && b.getBrand().equals("Chromium")) {
+                        major = b.getMajorVersion();
+                        full = b.getFullVersion();
+                    }
+                }
+            }
+            if (major == null) return;
+            list.add(new UserAgentMetadata.BrandVersion.Builder()
+                    .setBrand("Google Chrome").setMajorVersion(major).setFullVersion(full).build());
+            WebSettingsCompat.setUserAgentMetadata(s,
+                    new UserAgentMetadata.Builder(cur).setBrandVersionList(list).build());
+        } catch (Exception ignored) {
+        }
     }
 
     private void installScript() {
