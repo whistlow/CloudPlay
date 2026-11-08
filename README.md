@@ -8,7 +8,8 @@ A minimal Android app that opens https://www.xbox.com/en-us/play full-screen in 
 - **Controller rumble** on your controller's motors, or on the phone as a fallback
 - **Clarity boost** presets (Low / Medium / High / Vivid) or custom sharpen/unsharp-mask sliders, which switch live during a game
 - **Touch controls** you can drag and resize in-game (Edit touch layout)
-- **Performance:** highest refresh rate, low-latency Wi-Fi, sustained performance mode
+- **Controllers:** native controller bridge (works even where WebView has no gamepad support), rumble, hold View for the menu
+- **Performance:** low-latency video buffer, Android game mode, highest refresh rate, low-latency Wi-Fi, sustained performance mode
 - **CloudPlay engine** (if Better xCloud is off): its own resolution/codec/bitrate/region/stats settings
 
 Open the CloudPlay menu with Back, or hold View/Select for 1 second.

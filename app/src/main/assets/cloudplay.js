@@ -14,6 +14,20 @@
 
   function native() { return window.CloudPlayNative; }
 
+  // First run with Better xCloud: start from faster defaults (all changeable in its settings).
+  if (BX) {
+    try {
+      if (!localStorage.getItem('BetterXcloud')) {
+        localStorage.setItem('BetterXcloud', JSON.stringify({
+          'stream.video.resolution': '1080p',
+          'ui.splashVideo.skip': true,
+          'ui.reduceAnimations': true,
+          'block.tracking': true
+        }));
+      }
+    } catch (e) {}
+  }
+
   // Look like regular Chrome rather than an in-app WebView (some Xbox features check this).
   try {
     var uad = navigator.userAgentData;
@@ -334,48 +348,121 @@
   }
 
   // ======================================================= gamepad plumbing
+  // Controllers come from two places: WebView's own Gamepad API (not on every device),
+  // and the app's native bridge, which reads controllers straight from Android.
   var nav = navigator;
   var origGetGamepads = nav.getGamepads ? nav.getGamepads.bind(nav) : null;
+  var inputMode = C.controllerInput || 'auto';
 
   function realPads() {
-    var list = origGetGamepads ? origGetGamepads() : [];
     var out = [];
-    for (var i = 0; i < list.length; i++) out.push(list[i] || null);
+    if (!origGetGamepads || inputMode === 'bridge') return out;
+    try {
+      var list = origGetGamepads() || [];
+      for (var i = 0; i < list.length; i++) out.push(list[i] || null);
+    } catch (e) {}
     return out;
   }
-  function realPadConnected() {
-    return realPads().some(function (p) { return p && p.connected; });
-  }
 
-  if (origGetGamepads && (rumbleOn || touchOn)) {
-    Object.defineProperty(nav, 'getGamepads', {
-      configurable: true,
-      value: function () {
-        var list = realPads().map(function (gp) {
-          if (!gp || !rumbleOn) return gp;
-          return {
-            id: gp.id, index: gp.index, connected: gp.connected, mapping: gp.mapping,
-            timestamp: gp.timestamp, axes: gp.axes, buttons: gp.buttons,
-            vibrationActuator: actuator, hapticActuators: []
-          };
-        });
-        if (vpadActive) {
-          var slot = list.indexOf(null);
-          if (slot < 0) slot = list.length;
-          vpad.index = slot;
-          list[slot] = vpad;
+  var bridgeVer = -1, bridgeObjs = {};
+  function bridgePads() {
+    var n = native();
+    if (inputMode === 'webview' || !n || !n.padVersion) return bridgeObjs;
+    var v = n.padVersion();
+    if (v === bridgeVer) return bridgeObjs;
+    bridgeVer = v;
+    var arr;
+    try { arr = JSON.parse(n.padState()); } catch (e) { return bridgeObjs; }
+    var seen = {};
+    arr.forEach(function (p) {
+      var o = bridgeObjs[p.i], isNew = !o;
+      if (!o) {
+        o = bridgeObjs[p.i] = {
+          id: p.id, index: p.i, connected: true, mapping: 'standard', timestamp: performance.now(),
+          axes: [0, 0, 0, 0], buttons: [], vibrationActuator: actuator, hapticActuators: [], _t: -1
+        };
+        for (var k = 0; k < 17; k++) o.buttons.push({ pressed: false, touched: false, value: 0 });
+      }
+      if (o._t !== p.t) {
+        o._t = p.t;
+        o.timestamp = performance.now();
+        for (var b = 0; b < 17; b++) {
+          var val = p.b[b] || 0, btn = o.buttons[b];
+          btn.value = val;
+          btn.pressed = btn.touched = val > 0.12;
         }
-        return list;
+        for (var a = 0; a < 4; a++) o.axes[a] = p.a[a] || 0;
+      }
+      seen[p.i] = 1;
+      if (isNew) announce('gamepadconnected', o);
+    });
+    Object.keys(bridgeObjs).forEach(function (k) {
+      if (!seen[k]) {
+        var o = bridgeObjs[k];
+        o.connected = false;
+        delete bridgeObjs[k];
+        announce('gamepaddisconnected', o);
       }
     });
+    return bridgeObjs;
   }
 
-  function announce(type) {
+  function realPadConnected() {
+    return Object.keys(bridgePads()).length > 0 || realPads().some(function (p) { return p && p.connected; });
+  }
+
+  Object.defineProperty(nav, 'getGamepads', {
+    configurable: true,
+    value: function () {
+      var list = [null, null, null, null];
+      var bp = bridgePads(), bridged = Object.keys(bp);
+      if (bridged.length) {
+        bridged.forEach(function (k) { list[k] = bp[k]; });
+      } else {
+        realPads().forEach(function (gp, i) {
+          if (!gp) return;
+          // Keep the real Gamepad object; only attach the app's rumble to it.
+          if (rumbleOn) {
+            try { Object.defineProperty(gp, 'vibrationActuator', { configurable: true, value: actuator }); } catch (e) {}
+          }
+          list[i] = gp;
+        });
+      }
+      if (vpadActive) {
+        var slot = list.indexOf(null);
+        if (slot < 0) slot = list.length;
+        vpad.index = slot;
+        list[slot] = vpad;
+      }
+      return list;
+    }
+  });
+
+  function announce(type, pad) {
     try {
       var ev = new Event(type);
-      Object.defineProperty(ev, 'gamepad', { value: vpad });
+      Object.defineProperty(ev, 'gamepad', { value: pad || vpad });
       window.dispatchEvent(ev);
     } catch (e) {}
+  }
+
+  // Pick up newly connected controllers even before the page starts polling.
+  setInterval(bridgePads, 500);
+
+  // ================================================================ latency
+  // Ask WebRTC for the smallest playout buffer: lower input-to-photon delay.
+  if (C.lowLatency !== false) {
+    setInterval(function () {
+      pcs.forEach(function (pc) {
+        if (pc.connectionState === 'closed') return;
+        try {
+          pc.getReceivers().forEach(function (r) {
+            if ('jitterBufferTarget' in r) { if (r.jitterBufferTarget !== 0) r.jitterBufferTarget = 0; }
+            else if ('playoutDelayHint' in r) { if (r.playoutDelayHint !== 0) r.playoutDelayHint = 0; }
+          });
+        } catch (e) {}
+      });
+    }, 1000);
   }
 
   // ======================================================== touch overlay UI

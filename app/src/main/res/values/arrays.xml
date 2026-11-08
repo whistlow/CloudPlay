@@ -117,4 +117,15 @@
         <item>auto</item>
         <item>always</item>
     </string-array>
+
+    <string-array name="input_entries">
+        <item>Auto (app bridge first, WebView as backup)</item>
+        <item>App bridge (always read controllers natively)</item>
+        <item>WebView built-in only</item>
+    </string-array>
+    <string-array name="input_values">
+        <item>auto</item>
+        <item>bridge</item>
+        <item>webview</item>
+    </string-array>
 </resources>

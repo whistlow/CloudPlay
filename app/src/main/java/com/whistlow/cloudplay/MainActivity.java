@@ -13,6 +13,8 @@ import android.os.PowerManager;
 import android.view.Display;
 import android.view.InputDevice;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
+import android.hardware.input.InputManager;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
@@ -64,6 +66,7 @@ public class MainActivity extends AppCompatActivity {
     private String scriptBody;
     private String bxScript;
     private Rumbler rumbler;
+    private final GamepadBridge gamepads = new GamepadBridge();
     private String appliedConfig;
     private String appliedUrl;
     private WifiManager.WifiLock wifiLock;
@@ -111,6 +114,7 @@ public class MainActivity extends AppCompatActivity {
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) s.setOffscreenPreRaster(true);
         s.setSupportMultipleWindows(false); // keep sign-in popups in this view
         // Present as regular Chrome: drop the WebView markers from the UA string and brand list.
         s.setUserAgentString(s.getUserAgentString().replace("; wv", "").replace("Version/4.0 ", ""));
@@ -251,6 +255,8 @@ public class MainActivity extends AppCompatActivity {
             o.put("touchOpacity", p.getInt("touch_opacity", 60));
             o.put("touchSize", p.getInt("touch_size", 100));
             o.put("touchLayout", p.getString("touch_layout", ""));
+            o.put("controllerInput", p.getString("controller_input", "auto"));
+            o.put("lowLatency", p.getBoolean("low_latency", true));
         } catch (JSONException ignored) {
         }
         return o.toString();
@@ -349,6 +355,16 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
+        public int padVersion() {
+            return gamepads.version();
+        }
+
+        @JavascriptInterface
+        public String padState() {
+            return gamepads.state();
+        }
+
+        @JavascriptInterface
         public void stopRumble() {
             rumbler.stop();
         }
@@ -389,6 +405,8 @@ public class MainActivity extends AppCompatActivity {
         }
 
         applyPerformance();
+        InputManager im = (InputManager) getSystemService(Context.INPUT_SERVICE);
+        if (im != null) im.registerInputDeviceListener(gamepads, handler);
         enterImmersive();
     }
 
@@ -398,6 +416,9 @@ public class MainActivity extends AppCompatActivity {
         handler.removeCallbacks(showMenuRunnable);
         releaseWifiLock();
         rumbler.stop();
+        gamepads.releaseAll();
+        InputManager im = (InputManager) getSystemService(Context.INPUT_SERVICE);
+        if (im != null) im.unregisterInputDeviceListener(gamepads);
         CookieManager.getInstance().flush();
     }
 
@@ -488,11 +509,19 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+    public boolean dispatchGenericMotionEvent(MotionEvent e) {
+        gamepads.onMotion(e);
+        return super.dispatchGenericMotionEvent(e);
+    }
+
+    @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
         int code = e.getKeyCode();
+        boolean fromPad = isFromGamepad(e);
+        if (fromPad) gamepads.onKey(e);
 
         // Hold View/Select to open the CloudPlay menu.
-        if (code == KeyEvent.KEYCODE_BUTTON_SELECT) {
+        if (code == KeyEvent.KEYCODE_BUTTON_SELECT || (fromPad && code == KeyEvent.KEYCODE_BACK)) {
             if (e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) {
                 handler.postDelayed(showMenuRunnable, MENU_HOLD_MS);
             } else if (e.getAction() == KeyEvent.ACTION_UP) {
@@ -502,8 +531,9 @@ public class MainActivity extends AppCompatActivity {
 
         // Send every controller button straight to the game. Without this, Android turns an
         // unhandled B press into "Back", which would kick you out of the game.
-        if (webView != null && isFromGamepad(e)
-                && (KeyEvent.isGamepadButton(code) || code == KeyEvent.KEYCODE_BACK)) {
+        if (webView != null && fromPad
+                && (KeyEvent.isGamepadButton(code) || code == KeyEvent.KEYCODE_BACK
+                    || code == KeyEvent.KEYCODE_MENU)) {
             webView.dispatchKeyEvent(e);
             return true;
         }

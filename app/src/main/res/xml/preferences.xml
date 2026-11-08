@@ -121,6 +121,14 @@
 
     <PreferenceCategory app:title="Controls" app:iconSpaceReserved="false">
         <ListPreference
+            app:key="controller_input"
+            app:title="Controller input"
+            app:entries="@array/input_entries"
+            app:entryValues="@array/input_values"
+            app:defaultValue="auto"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+        <ListPreference
             app:key="rumble"
             app:title="Rumble"
             app:entries="@array/rumble_entries"
@@ -171,6 +179,12 @@
     </PreferenceCategory>
 
     <PreferenceCategory app:title="Performance" app:iconSpaceReserved="false">
+        <SwitchPreferenceCompat
+            app:key="low_latency"
+            app:title="Low-latency mode"
+            app:summary="Smallest video and audio buffer for the quickest response. Turn off if the stream stutters on a weak connection."
+            app:defaultValue="true"
+            app:iconSpaceReserved="false" />
         <SwitchPreferenceCompat
             app:key="max_refresh"
             app:title="Highest refresh rate"
