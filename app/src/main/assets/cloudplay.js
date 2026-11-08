@@ -185,8 +185,8 @@
       (location.pathname.indexOf('/play/consoles/launch/') >= 0 && /\/inputconfigs$/.test(url.split('?')[0]));
   }
 
-  function deviceInfo() {
-    var os = OS_NAMES[C.resolution] || 'windows';
+  function deviceInfo(res) {
+    var os = OS_NAMES[res || C.resolution] || 'windows';
     return JSON.stringify({
       appInfo: { env: { clientAppId: location.host, clientAppType: 'browser', clientAppVersion: '26.1.97',
         clientSdkVersion: '10.3.7', httpEnvironment: 'prod', sdkInstallId: '' } },
@@ -255,6 +255,19 @@
     } catch (e) {}
     return res;
   }
+
+  // Remote Play resolution (standard connection): only tells Xbox which kind of device is
+  // connecting; everything else about the connection stays exactly as the website does it.
+  if (PURE_RP && OS_NAMES[C.rpResolution]) window.fetch = async function (input, init) {
+    var url = typeof input === 'string' ? input : (input && input.url) || String(input);
+    if (!isXhome(url)) return origFetch.call(this, input, init);
+    var req = new Request(input, init);
+    var headers = new Headers(req.headers);
+    headers.set('x-ms-device-info', deviceInfo(C.rpResolution));
+    var opts = { method: req.method, headers: headers };
+    if (req.method !== 'GET' && req.method !== 'HEAD') opts.body = await req.clone().text();
+    return origFetch(new Request(req.url, opts));
+  };
 
   if (ACTIVE) window.fetch = async function (input, init) {
     var url = typeof input === 'string' ? input : (input && input.url) || String(input);
@@ -342,13 +355,13 @@
     return out.join('\r\n');
   }
 
-  if (PC && PC.prototype.createOffer && ACTIVE) {
+  if (PC && PC.prototype.createOffer) {
     var origCreateOffer = PC.prototype.createOffer;
     PC.prototype.createOffer = async function () {
       if (pcs.indexOf(this) < 0) pcs.push(this); // used to know when a stream is live
-      if (!BX) { try { applyCodec(this); } catch (e) {} }
+      if (!BX && ACTIVE) { try { applyCodec(this); } catch (e) {} }
       var offer = await origCreateOffer.apply(this, arguments);
-      if (!BX) {
+      if (!BX && ACTIVE) {
         try {
           if (offer && offer.sdp) offer = { type: offer.type, sdp: limitBitrate(offer.sdp) };
         } catch (e) {}
@@ -394,7 +407,7 @@
       'html,body{overscroll-behavior:none;}';
     document.head.appendChild(style);
   }
-  if (ACTIVE) onReady(applyVideoStyle);
+  onReady(applyVideoStyle);
 
   // Called by the app to switch clarity presets live, without reloading.
   window.__cpSetVideo = function (v) {
@@ -618,6 +631,7 @@
 
   function isTopIcon(el) {
     if (el.classList.contains('cp-header-gear') || !el.querySelector('svg') || el.querySelector('img')) return null;
+    if (el.closest('#StreamHud, .cp-hud-gear, .cpm-backdrop')) return null;
     var r = el.getBoundingClientRect();
     if (r.width === 0 || r.width > 90 || r.top > 140 || r.top < -10) return null;
     return r;
@@ -653,7 +667,11 @@
 
   var headerReported = null;
   function ensureHeaderGear() {
-    if (lastStreaming) return; // nothing to do in-game
+    if (lastStreaming || location.pathname.indexOf('/launch/') >= 0) { // in-game: no header gear
+      var g0 = document.querySelector('.cp-header-gear');
+      if (g0) g0.remove();
+      return;
+    }
     var existing = document.querySelector('.cp-header-gear');
     // Cheap check first: still attached next to the same kind of icon, and nothing to its right.
     var ok = existing && existing.isConnected && existing.previousElementSibling &&
@@ -692,7 +710,71 @@
     return 'https://www.xbox.com/' + (m ? m[1] : 'en-US') + '/play/consoles';
   }
 
-  var menuEl = null, rows = [], focusIdx = 0, page = 'main', padTimer = null;
+  var menuEl = null, rows = [], focusIdx = 0, page = 'main', rootPage = 'main', padTimer = null;
+
+  // Remote Play settings: picture options apply instantly (display only); resolution and
+  // connection apply the next time you connect to your console.
+  var FITS = [['contain', 'Fit'], ['cover', 'Zoom to fill'], ['fill', 'Stretch']];
+  var RP_RES = [['auto', 'Auto'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']];
+  function nextOf(list, cur) {
+    var i = list.findIndex(function (x) { return x[0] === cur; });
+    return list[(i + 1) % list.length];
+  }
+  function nameOf(list, cur) { return (list.filter(function (x) { return x[0] === cur; })[0] || list[0])[1]; }
+  function savePref(key, value) { try { native() && native().setPref(key, String(value)); } catch (e) {} }
+
+  function remoteItems() {
+    return [
+      { label: 'Clarity boost', detail: clarityName(C.clarityPreset || 'off'), go: function () { render('clarity'); } },
+      { label: 'Screen fit', detail: nameOf(FITS, C.videoFit || 'contain'), go: function () {
+        var n = nextOf(FITS, C.videoFit || 'contain');
+        C.videoFit = n[0]; savePref('video_fit', n[0]); applyVideoStyle(); render('remote', focusIdx);
+      } },
+      { label: 'Stream stats', detail: C.showStats ? 'On' : 'Off', go: function () {
+        C.showStats = !C.showStats; savePref('show_stats', C.showStats); render('remote', focusIdx);
+      } },
+      { label: 'Resolution', sub: 'Applies next time you connect', detail: nameOf(RP_RES, C.rpResolution || 'auto'), go: function () {
+        var n = nextOf(RP_RES, C.rpResolution || 'auto');
+        C.rpResolution = n[0]; savePref('rp_resolution', n[0]); render('remote', focusIdx);
+      } },
+      { label: 'Connection', sub: 'Applies next time you connect',
+        detail: C.remotePlayMode === 'direct' ? 'Direct (home Wi-Fi)' : 'Standard', go: function () {
+        C.remotePlayMode = C.remotePlayMode === 'direct' ? 'standard' : 'direct';
+        savePref('remote_play_mode', C.remotePlayMode); render('remote', focusIdx);
+      } },
+      { label: 'Touch controls', sub: 'Show or hide on-screen buttons', go: function () { close(); window.__cpTouch && __cpTouch.toggle(); } },
+      { label: 'App settings', go: function () { close(); native() && native().openSettings(); } },
+      { label: 'Exit app', go: function () { native() && native().exitApp(); } }
+    ];
+  }
+
+  // Gear in the in-game bar (next to the Xbox and controller buttons), cloned from the bar's
+  // own button so it matches. Used wherever the enhancement engine isn't adding its own.
+  function ensureHudGear() {
+    if (BX) return;
+    var hud = document.getElementById('StreamHud');
+    if (!hud || hud.querySelector('.cp-hud-gear')) return;
+    var org = hud.querySelector('div[class^=HUDButton]');
+    var btnOrg = org && org.querySelector('button');
+    var svgOrg = btnOrg && btnOrg.querySelector('svg');
+    if (!svgOrg) return;
+    var box = org.cloneNode(true);
+    box.classList.add('cp-hud-gear');
+    var b = box.querySelector('button');
+    b.setAttribute('title', 'Settings');
+    b.setAttribute('aria-label', 'Settings');
+    b.removeAttribute('id');
+    var svg = box.querySelector('svg');
+    var g = gearSvg(svg);
+    g.style.fill = 'none';
+    svg.parentNode.replaceChild(g, svg);
+    b.addEventListener('click', function (e) {
+      e.preventDefault(); e.stopPropagation(); window.__cpMenu.open();
+    }, true);
+    var parent = org.parentElement;
+    parent.insertBefore(box, parent.lastElementChild);
+  }
+  onReady(function () { setInterval(function () { if (lastStreaming) ensureHudGear(); }, 700); });
 
   function mainItems() {
     var preset = (CLARITY.filter(function (c) { return c[0] === (C.clarityPreset || 'off'); })[0] || CLARITY[0])[1];
@@ -774,20 +856,21 @@
     box.innerHTML = '';
     var head = document.createElement('div'); head.className = 'cpm-head';
     var title = document.createElement('div'); title.className = 'cpm-title';
-    if (which !== 'main') {
+    if (which === 'clarity') {
       var back = document.createElement('button'); back.className = 'cpm-back'; back.setAttribute('aria-label', 'Back');
       back.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-      back.onclick = function () { render('main'); };
+      back.onclick = function () { render(rootPage); };
       title.appendChild(back);
     }
-    title.appendChild(document.createTextNode(which === 'main' ? 'Settings' : 'Clarity boost'));
+    title.appendChild(document.createTextNode(
+      which === 'main' ? 'Settings' : which === 'remote' ? 'Remote Play settings' : 'Clarity boost'));
     var x = document.createElement('button'); x.className = 'cpm-close'; x.setAttribute('aria-label', 'Close');
     x.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
     x.onclick = close;
     head.appendChild(title); head.appendChild(x); box.appendChild(head);
 
     var list = document.createElement('div'); list.className = 'cpm-list';
-    var items = which === 'main' ? mainItems() : clarityItems();
+    var items = which === 'main' ? mainItems() : which === 'remote' ? remoteItems() : clarityItems();
     rows = items.map(function (it, k) {
       var r = document.createElement('div'); r.className = 'cpm-row';
       var txt = document.createElement('div'); txt.className = 'cpm-txt';
@@ -807,13 +890,13 @@
     });
     box.appendChild(list);
     var hint = document.createElement('div'); hint.className = 'cpm-hint';
-    hint.textContent = which === 'main' ? '\u24B6 Select    \u24B7 Close' : '\u24B6 Select    \u24B7 Back';
+     hint.textContent = which === rootPage ? '\u24B6 Select    \u24B7 Close' : '\u24B6 Select    \u24B7 Back';
     box.appendChild(hint);
     var checked = rows.findIndex(function (r) { return r._checked; });
     setFocus(keepFocus != null ? keepFocus : Math.max(0, checked));
   }
 
-  function goBackOrClose() { if (page !== 'main') render('main'); else close(); }
+  function goBackOrClose() { if (page !== rootPage) render(rootPage); else close(); }
 
   // Controller navigation for the panel (D-pad / left stick, A, B), with key repeat.
   function startPadNav() {
@@ -864,7 +947,8 @@
     menuEl.addEventListener('click', close);
     document.documentElement.appendChild(menuEl);
     window.addEventListener('keydown', onKey, true);
-    render('main');
+    rootPage = PURE_RP ? 'remote' : 'main';
+    render(rootPage);
     // Ignore the button press that opened the panel.
     setTimeout(startPadNav, 250);
   }
@@ -1249,11 +1333,11 @@
   onReady(function () { setInterval(tick, 400); });
 
   // ============================================================ stats panel
-  if (C.showStats && !BX && ACTIVE) {
+  if (!BX) {
     var el = null, prev = {};
     setInterval(async function () {
       var pc = pcs.filter(function (p) { return p.connectionState === 'connected'; }).pop();
-      if (!pc) { if (el) el.style.display = 'none'; prev = {}; return; }
+      if (!pc || !C.showStats) { if (el) el.style.display = 'none'; prev = {}; return; }
       if (!el) {
         el = document.createElement('div');
         el.style.cssText = 'position:fixed;top:6px;left:6px;z-index:2147483647;background:rgba(0,0,0,.6);' +

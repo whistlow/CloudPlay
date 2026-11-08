@@ -336,6 +336,7 @@ public class MainActivity extends AppCompatActivity {
             o.put("clarityPreset", p.getString("clarity_preset", "off"));
             o.put("remotePlayMode", p.getString("remote_play_mode", "standard"));
             o.put("fastArt", p.getBoolean("fast_art", true));
+            o.put("rpResolution", p.getString("rp_resolution", "auto"));
             o.put("startUrl", startUrl());
         } catch (JSONException ignored) {
         }
@@ -458,6 +459,18 @@ public class MainActivity extends AppCompatActivity {
                 refreshScriptWithoutReload();
                 if (webView != null) webView.evaluateJavascript(
                         "window.__cpSetVideo && __cpSetVideo(" + videoConfig() + ")", null);
+            });
+        }
+
+        /** Save a setting changed from the in-page panel (applies on the next page load). */
+        @JavascriptInterface
+        public void setPref(String key, String value) {
+            runOnUiThread(() -> {
+                SharedPreferences.Editor e = prefs().edit();
+                if ("show_stats".equals(key)) e.putBoolean(key, "true".equals(value));
+                else e.putString(key, value);
+                e.apply();
+                if (webView != null) refreshScriptWithoutReload();
             });
         }
 

@@ -92,6 +92,14 @@
 
     <PreferenceCategory app:title="Remote Play" app:iconSpaceReserved="false">
         <ListPreference
+            app:key="rp_resolution"
+            app:title="Resolution"
+            app:entries="@array/rp_res_entries"
+            app:entryValues="@array/rp_res_values"
+            app:defaultValue="auto"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+        <ListPreference
             app:key="remote_play_mode"
             app:title="Connection"
             app:entries="@array/rp_entries"
