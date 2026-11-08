@@ -118,6 +118,9 @@ public class MainActivity extends AppCompatActivity {
         s.setUseWideViewPort(true);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) s.setOffscreenPreRaster(true);
+        s.setCacheMode(WebSettings.LOAD_DEFAULT);     // reuse cached site files between launches
+        s.setGeolocationEnabled(false);
+        s.setSaveFormData(false);
         s.setSupportMultipleWindows(false); // keep sign-in popups in this view
         // Present as regular Chrome: drop the WebView markers from the UA string and brand list.
         s.setUserAgentString(s.getUserAgentString().replace("; wv", "").replace("Version/4.0 ", ""));

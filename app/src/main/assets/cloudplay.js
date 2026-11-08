@@ -528,45 +528,77 @@
     return svg;
   }
 
-  function findSearchButton() {
-    var cands = document.querySelectorAll('a[href*="/search"], button[aria-label*="earch"], a[aria-label*="earch"]');
-    for (var i = 0; i < cands.length; i++) {
-      var r = cands[i].getBoundingClientRect();
-      if (r.width > 0 && r.top < 160 && !cands[i].closest('.cpm-backdrop')) return cands[i];
-    }
-    return null;
+  // Icon-only buttons in the top bar (search, devices, controller...). The gear goes after
+  // the right-most one, i.e. just left of the profile picture / Sign in.
+  function topBar() {
+    return document.querySelector('header, [role="banner"]') || document.body;
+  }
+
+  function isTopIcon(el) {
+    if (el.classList.contains('cp-header-gear') || !el.querySelector('svg') || el.querySelector('img')) return null;
+    var r = el.getBoundingClientRect();
+    if (r.width === 0 || r.width > 90 || r.top > 140 || r.top < -10) return null;
+    return r;
+  }
+
+  function rightmostTopIcon() {
+    var best = null, bestR = null;
+    topBar().querySelectorAll('button, a').forEach(function (el) {
+      var r = isTopIcon(el);
+      if (r && (!bestR || r.right > bestR.right)) { best = el; bestR = r; }
+    });
+    return best;
+  }
+
+  function cleanClone(src) {
+    var btn = src.cloneNode(true);
+    var oldSvg = btn.querySelector('svg');
+    // Drop everything that isn't on the path to the icon (tooltips, labels, badges).
+    Array.prototype.slice.call(btn.querySelectorAll('*')).forEach(function (el) {
+      if (!btn.contains(el) || el === oldSvg || oldSvg.contains(el) || el.contains(oldSvg)) return;
+      el.remove();
+    });
+    Array.prototype.slice.call(btn.attributes).forEach(function (a) {
+      if (/^(id|href|aria-|data-|title|target|rel)/.test(a.name)) btn.removeAttribute(a.name);
+    });
+    btn.querySelectorAll('[id],[aria-describedby]').forEach(function (el) {
+      el.removeAttribute('id'); el.removeAttribute('aria-describedby');
+    });
+    oldSvg.parentNode.replaceChild(gearSvg(oldSvg), oldSvg);
+    return btn;
   }
 
   var headerReported = null;
   function ensureHeaderGear() {
+    if (lastStreaming) return; // nothing to do in-game
     var existing = document.querySelector('.cp-header-gear');
-    var search = findSearchButton();
-    if (!existing && search) {
-      var btn = search.cloneNode(true);
-      btn.classList.add('cp-header-gear');
-      btn.removeAttribute('href');
-      btn.removeAttribute('id');
-      btn.setAttribute('role', 'button');
-      btn.setAttribute('tabindex', '0');
-      btn.setAttribute('aria-label', 'Settings');
-      btn.setAttribute('title', 'Settings');
-      var oldSvg = btn.querySelector('svg');
-      if (oldSvg) oldSvg.parentNode.replaceChild(gearSvg(oldSvg), oldSvg);
-      else btn.appendChild(gearSvg(null));
-      btn.querySelectorAll('span').forEach(function (sp) { if (!sp.querySelector('svg')) sp.textContent = ''; });
-      btn.addEventListener('click', function (e) {
-        e.preventDefault(); e.stopPropagation(); openSettingsUi();
-      }, true);
-      search.parentNode.insertBefore(btn, search);
-      existing = btn;
+    // Cheap check first: still attached next to the same kind of icon, and nothing to its right.
+    var ok = existing && existing.isConnected && existing.previousElementSibling &&
+      isTopIcon(existing.previousElementSibling) && !(existing.nextElementSibling && isTopIcon(existing.nextElementSibling));
+    if (!ok) {
+      var anchor = rightmostTopIcon();
+      if (existing) existing.remove();
+      existing = null;
+      if (anchor) {
+        var btn = cleanClone(anchor);
+        btn.classList.add('cp-header-gear');
+        btn.setAttribute('role', 'button');
+        btn.setAttribute('tabindex', '0');
+        btn.setAttribute('aria-label', 'Settings');
+        btn.addEventListener('click', function (e) {
+          e.preventDefault(); e.stopPropagation(); openSettingsUi();
+        }, true);
+        anchor.parentNode.insertBefore(btn, anchor.nextSibling);
+        existing = btn;
+      }
     }
-    var present = !!(existing && existing.isConnected && existing.getBoundingClientRect().width > 0);
+    var present = !!existing;
     if (present !== headerReported) {
       headerReported = present;
       try { native() && native().setHeaderButton(present); } catch (e) {}
     }
   }
-  onReady(function () { setInterval(ensureHeaderGear, 800); ensureHeaderGear(); });
+  onReady(function () { setInterval(ensureHeaderGear, 1000); ensureHeaderGear(); });
 
   var CHEVRON = '<svg width="16" height="16" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -585,7 +617,7 @@
       { label: 'App settings', sub: 'Stream quality, controls, rumble, performance', go: function () { close(); native() && native().openSettings(); } }
     ];
     if (BX) items.push({ label: 'Advanced settings', sub: 'Upscaling, stats, server, mouse & keyboard', go: function () {
-      close(); setTimeout(function () { if (window.__cpOpenBx && __cpOpenBx() !== 'ok') toast('Sign in to use advanced settings'); }, 60);
+      close(); setTimeout(function () { if (window.__cpOpenBx && __cpOpenBx() !== 'ok') toast('Settings are still loading, try again in a moment'); }, 60);
     } });
     items.push(
       { label: 'Remote Play', sub: 'Play games installed on your Xbox console', go: function () { close(); location.href = remotePlayUrl(); } },
@@ -796,7 +828,7 @@
       'opacity:.7;margin:4px 2px 2px}';
     document.head.appendChild(st);
 
-    new MutationObserver(function () {
+    setInterval(function () {
       var top = document.querySelector('.bx-top-buttons');
       if (!top || top.querySelector('.cp-app-section')) return;
       var ad = top.querySelector('a[href*="better-xcloud.github.io/android"]');
@@ -829,7 +861,7 @@
       }));
       sec.appendChild(bxButton('Exit app', function () { native() && native().exitApp(); }));
       top.insertBefore(sec, top.firstChild);
-    }).observe(document.documentElement, { childList: true, subtree: true });
+    }, 300);
   });
 
   // One entry point for "open settings": the Settings dialog when available, else the panel.
@@ -1086,7 +1118,10 @@
   }
 
   function tick() {
-    if (!root) return;
+    if (!root) {
+      if (!(touchOn && streaming()) && forceShow === null && !editing) return;
+      buildOverlay();
+    }
     var vis = computeVisible();
     root.style.display = vis ? 'block' : 'none';
     var active = vis && !editing;
@@ -1099,15 +1134,18 @@
 
   // Opens Better xCloud's own settings dialog (via its header button).
   window.__cpOpenBx = function () {
+    if (typeof window.__bxShowSettings === 'function') {
+      try { window.__bxShowSettings(); return 'ok'; } catch (e) {}
+    }
     var b = document.querySelector('.bx-header-settings-button');
     if (b) { b.click(); return 'ok'; }
     return 'missing';
   };
 
   window.__cpTouch = {
-    toggle: function () { forceShow = !computeVisible(); tick(); },
+    toggle: function () { if (!root) buildOverlay(); forceShow = !computeVisible(); tick(); },
     edit: function () {
-      if (!root) return;
+      if (!root) buildOverlay();
       editing = true; selected = null;
       root.classList.add('cp-edit');
       releaseAll();
@@ -1123,10 +1161,7 @@
     }
   };
 
-  onReady(function () {
-    buildOverlay();
-    setInterval(tick, 400);
-  });
+  onReady(function () { setInterval(tick, 400); });
 
   // ============================================================ stats panel
   if (C.showStats && !BX) {
