@@ -90,6 +90,17 @@
             app:iconSpaceReserved="false" />
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="Remote Play" app:iconSpaceReserved="false">
+        <ListPreference
+            app:key="remote_play_mode"
+            app:title="Connection"
+            app:entries="@array/rp_entries"
+            app:entryValues="@array/rp_values"
+            app:defaultValue="standard"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="Clarity boost" app:iconSpaceReserved="false">
         <ListPreference
             app:key="clarity_preset"

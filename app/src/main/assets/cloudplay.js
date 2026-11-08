@@ -9,6 +9,10 @@
   // With the Better xCloud engine on, it handles stream quality, region, stats and its own
   // touch layouts, so CloudPlay leaves those alone and only adds rumble, clarity and overlays.
   var BX = C.engine === 'betterxcloud';
+  // Remote Play: "standard" connects exactly like the Xbox website (works on any network);
+  // "direct" adds the console's home addresses for a faster link on the same Wi-Fi.
+  var DIRECT_RP = C.remotePlayMode === 'direct';
+  window.__cpStockRemotePlay = !DIRECT_RP;
   var OS_NAMES = { '720p': 'android', '1080p': 'windows', '1080p_hq': 'tizen' };
   var H264_PROFILES = { h264_high: '64', h264_main: '4d', h264_baseline: '42' };
 
@@ -181,7 +185,7 @@
     var url = typeof input === 'string' ? input : (input && input.url) || String(input);
     var path = url.split('?')[0];
 
-    if (isXhome(url)) return handleXhome(input, init, url, path);
+    if (isXhome(url)) return DIRECT_RP ? handleXhome(input, init, url, path) : origFetch.call(this, input, init);
 
     // Stream resolution for cloud games and Remote Play: the server picks quality
     // from the client's reported OS.
@@ -874,6 +878,8 @@
   // Ask WebRTC for the smallest playout buffer: lower input-to-photon delay.
   if (C.lowLatency !== false) {
     setInterval(function () {
+      // Remote Play goes over the internet to your console: keep the normal buffer there.
+      if (location.pathname.indexOf('/play/consoles') >= 0) return;
       pcs.forEach(function (pc) {
         if (pc.connectionState === 'closed') return;
         try {

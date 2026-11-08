@@ -152,4 +152,13 @@
         <item>top_right</item>
         <item>top_left</item>
     </string-array>
+
+    <string-array name="rp_entries">
+        <item>Standard (works anywhere, same as the Xbox website)</item>
+        <item>Direct (home Wi-Fi only, lower latency)</item>
+    </string-array>
+    <string-array name="rp_values">
+        <item>standard</item>
+        <item>direct</item>
+    </string-array>
 </resources>
