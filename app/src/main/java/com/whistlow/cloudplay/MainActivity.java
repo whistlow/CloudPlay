@@ -333,6 +333,7 @@ public class MainActivity extends AppCompatActivity {
             o.put("lowLatency", p.getBoolean("low_latency", true));
             o.put("clarityPreset", p.getString("clarity_preset", "off"));
             o.put("remotePlayMode", p.getString("remote_play_mode", "standard"));
+            o.put("fastArt", p.getBoolean("fast_art", true));
             o.put("startUrl", startUrl());
         } catch (JSONException ignored) {
         }

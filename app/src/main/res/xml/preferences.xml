@@ -216,6 +216,12 @@
 
     <PreferenceCategory app:title="Performance" app:iconSpaceReserved="false">
         <SwitchPreferenceCompat
+            app:key="fast_art"
+            app:title="Faster page loading"
+            app:summary="Downloads game artwork as smaller images so pages fill in quicker"
+            app:defaultValue="true"
+            app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat
             app:key="low_latency"
             app:title="Low-latency mode"
             app:summary="Smallest video and audio buffer for the quickest response. Turn off if the stream stutters on a weak connection."
