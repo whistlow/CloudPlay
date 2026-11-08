@@ -14,18 +14,40 @@
 
   function native() { return window.CloudPlayNative; }
 
-  // First run with Better xCloud: start from faster defaults (all changeable in its settings).
+  // Keep the Xbox website looking exactly like Microsoft's: the advanced engine only adds
+  // settings. Applied once per install (and to existing installs on update); everything
+  // stays changeable in Settings afterwards.
   if (BX) {
     try {
-      if (!localStorage.getItem('BetterXcloud')) {
-        localStorage.setItem('BetterXcloud', JSON.stringify({
-          'stream.video.resolution': '1080p',
-          'ui.splashVideo.skip': true,
-          'ui.reduceAnimations': true,
-          'block.tracking': true
-        }));
+      if (!localStorage.getItem('cp.stockUi.v1')) {
+        var cur = JSON.parse(localStorage.getItem('BetterXcloud') || '{}');
+        var stock = {
+          'ui.layout': 'default',
+          'ui.theme': 'default',
+          'ui.hideSections': [],
+          'ui.gameCard.waitTime.show': false,
+          'ui.controllerStatus.show': false,
+          'ui.hideScrollbar': false,
+          'ui.reduceAnimations': false,
+          'ui.splashVideo.skip': false,
+          'ui.streamMenu.simplify': false,
+          'loadingScreen.gameArt.show': false,
+          'loadingScreen.waitTime.show': false,
+          'loadingScreen.rocket': 'show'
+        };
+        Object.keys(stock).forEach(function (k) { cur[k] = stock[k]; });
+        if (!('stream.video.resolution' in cur)) cur['stream.video.resolution'] = '1080p';
+        if (!('block.tracking' in cur)) cur['block.tracking'] = true;
+        localStorage.setItem('BetterXcloud', JSON.stringify(cur));
+        localStorage.setItem('cp.stockUi.v1', '1');
       }
     } catch (e) {}
+    // Its own header buttons are replaced by the settings gear next to Search.
+    onReady(function () {
+      var st = document.createElement('style');
+      st.textContent = '.bx-header-settings-button,.bx-header-remote-play-button{display:none !important}';
+      document.head.appendChild(st);
+    });
   }
 
   // Look like regular Chrome rather than an in-app WebView (some Xbox features check this).
@@ -1026,7 +1048,7 @@
   // Opens Better xCloud's own settings dialog (via its header button).
   window.__cpOpenBx = function () {
     var b = document.querySelector('.bx-header-settings-button');
-    if (b) { b.classList.remove('bx-gone'); b.click(); return 'ok'; }
+    if (b) { b.click(); return 'ok'; }
     return 'missing';
   };
 

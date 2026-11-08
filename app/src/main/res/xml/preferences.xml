@@ -247,8 +247,10 @@
             app:summary="Removes cookies, cache, saved logins and advanced settings"
             app:iconSpaceReserved="false" />
         <Preference
-            app:key="licenses"
-            app:title="Open-source licenses"
+            app:key="about"
+            app:title="Made by whistlow"
+            app:summary="github.com/whistlow"
+            app:selectable="false"
             app:iconSpaceReserved="false" />
     </PreferenceCategory>
 </PreferenceScreen>
