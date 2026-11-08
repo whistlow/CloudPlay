@@ -4,11 +4,11 @@
 
     <PreferenceCategory app:title="Quick access" app:iconSpaceReserved="false">
         <ListPreference
-            app:key="settings_button"
-            app:title="Floating settings button (when the Xbox header is hidden)"
+            app:key="floating_gear"
+            app:title="Extra floating settings button"
             app:entries="@array/gear_entries"
             app:entryValues="@array/gear_values"
-            app:defaultValue="auto"
+            app:defaultValue="off"
             app:useSimpleSummaryProvider="true"
             app:iconSpaceReserved="false" />
         <ListPreference

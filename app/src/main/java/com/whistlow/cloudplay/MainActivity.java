@@ -243,7 +243,7 @@ public class MainActivity extends AppCompatActivity {
     private void updateGear() {
         if (gear == null) return;
         SharedPreferences p = prefs();
-        String mode = p.getString("settings_button", "auto");
+        String mode = p.getString("floating_gear", "off");
         boolean show = "always".equals(mode) || ("auto".equals(mode) && !streaming && !headerButton);
         gear.setVisibility(show ? View.VISIBLE : View.GONE);
 
@@ -276,7 +276,9 @@ public class MainActivity extends AppCompatActivity {
                 } catch (JSONException ignored) {
                 }
                 // Stop right away inside iframes: only the main page needs it.
-                bxScript = "\"use strict\";\nif (window.top !== window) throw 'skip-frame';\nwindow.BX_FLAGS="
+                // ...and on standard Remote Play pages, which run as the plain Xbox website.
+                bxScript = "\"use strict\";\nif (window.top !== window) throw 'skip-frame';\n"
+                        + "if (window.__cpPureRemote) throw 'skip-remote-play';\nwindow.BX_FLAGS="
                         + flags + ";\n" + readAsset("better-xcloud/better-xcloud.user.js");
             }
             bx = bxScript;

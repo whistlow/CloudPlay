@@ -13,6 +13,33 @@
   // "direct" adds the console's home addresses for a faster link on the same Wi-Fi.
   var DIRECT_RP = C.remotePlayMode === 'direct';
   window.__cpStockRemotePlay = !DIRECT_RP;
+  // Standard Remote Play runs as the plain Xbox website: no enhancement engine and no
+  // stream tweaks on /play/consoles pages, only controller input and rumble.
+  var PURE_RP = !DIRECT_RP && /\/play\/consoles/.test(location.pathname);
+  window.__cpPureRemote = PURE_RP;
+  var ACTIVE = !PURE_RP;
+  if (PURE_RP) BX = false;
+
+  // The site switches pages without reloading; crossing into or out of Remote Play does a
+  // full load so each side starts clean.
+  if (!DIRECT_RP) (function () {
+    function isRP(u) {
+      try { return /\/play\/consoles/.test(new URL(u, location.href).pathname); } catch (e) { return false; }
+    }
+    ['pushState', 'replaceState'].forEach(function (m) {
+      var orig = history[m];
+      history[m] = function (state, title, url) {
+        if (url != null && isRP(url) !== PURE_RP) {
+          location.assign(new URL(url, location.href).href);
+          return;
+        }
+        return orig.apply(this, arguments);
+      };
+    });
+    window.addEventListener('popstate', function () {
+      if (isRP(location.href) !== PURE_RP) location.reload();
+    });
+  })();
   var OS_NAMES = { '720p': 'android', '1080p': 'windows', '1080p_hq': 'tizen' };
   var H264_PROFILES = { h264_high: '64', h264_main: '4d', h264_baseline: '42' };
 
@@ -64,7 +91,7 @@
   }
 
   // Look like regular Chrome rather than an in-app WebView (some Xbox features check this).
-  try {
+  if (ACTIVE) try {
     var uad = navigator.userAgentData;
     if (uad && uad.brands && uad.brands.some(function (b) { return /webview/i.test(b.brand); })) {
       var ver = (navigator.userAgent.match(/Chrome\/(\d+)/) || [])[1] || '130';
@@ -207,7 +234,7 @@
     return res;
   }
 
-  if (!BX) window.fetch = async function (input, init) {
+  if (!BX && ACTIVE) window.fetch = async function (input, init) {
     var url = typeof input === 'string' ? input : (input && input.url) || String(input);
     var path = url.split('?')[0];
 
@@ -290,7 +317,7 @@
     return out.join('\r\n');
   }
 
-  if (PC && PC.prototype.createOffer) {
+  if (PC && PC.prototype.createOffer && ACTIVE) {
     var origCreateOffer = PC.prototype.createOffer;
     PC.prototype.createOffer = async function () {
       if (pcs.indexOf(this) < 0) pcs.push(this); // used to know when a stream is live
@@ -342,7 +369,7 @@
       'html,body{overscroll-behavior:none;}';
     document.head.appendChild(style);
   }
-  onReady(applyVideoStyle);
+  if (ACTIVE) onReady(applyVideoStyle);
 
   // Called by the app to switch clarity presets live, without reloading.
   window.__cpSetVideo = function (v) {
@@ -573,7 +600,8 @@
 
   function rightmostTopIcon() {
     var best = null, bestR = null;
-    topBar().querySelectorAll('button, a').forEach(function (el) {
+    // Whole page: on some pages the top bar sits over the hero art, outside any <header>.
+    document.querySelectorAll('button, a').forEach(function (el) {
       var r = isTopIcon(el);
       if (r && (!bestR || r.right > bestR.right)) { best = el; bestR = r; }
     });
@@ -902,7 +930,7 @@
 
   // ================================================================ latency
   // Ask WebRTC for the smallest playout buffer: lower input-to-photon delay.
-  if (C.lowLatency !== false) {
+  if (C.lowLatency !== false && ACTIVE) {
     setInterval(function () {
       // Remote Play goes over the internet to your console: keep the normal buffer there.
       if (location.pathname.indexOf('/play/consoles') >= 0) return;
@@ -1196,7 +1224,7 @@
   onReady(function () { setInterval(tick, 400); });
 
   // ============================================================ stats panel
-  if (C.showStats && !BX) {
+  if (C.showStats && !BX && ACTIVE) {
     var el = null, prev = {};
     setInterval(async function () {
       var pc = pcs.filter(function (p) { return p.connectionState === 'connected'; }).pop();
