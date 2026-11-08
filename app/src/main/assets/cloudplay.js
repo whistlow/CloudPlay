@@ -73,6 +73,28 @@
         localStorage.setItem('cp.stockUi.v1', '1');
       }
     } catch (e) {}
+    // Quality settings from App settings: copied over whenever they change there, so the
+    // in-page Settings and App settings stay in step (the most recent change wins).
+    try {
+      var nat = {
+        'stream.video.resolution': { auto: 'auto', '720p': '720p', '1080p': '1080p', '1080p_hq': '1080p-hq' }[C.resolution] || 'auto',
+        'stream.video.codecProfile': { auto: 'default', h264_high: 'high', h264_main: 'normal', h264_baseline: 'low' }[C.codec] || 'default',
+        'stream.video.maxBitrate': (function (kbps) {
+          kbps = parseInt(kbps, 10) || 0;
+          return (!kbps || kbps >= 15000) ? 0 : Math.round(kbps / 1000 * 1024 * 1000);
+        })(C.maxBitrate),
+        'server.region': (C.region && C.region !== 'auto') ? C.region : 'default'
+      };
+      var last = JSON.parse(localStorage.getItem('cp.nativeQuality') || 'null');
+      var cur2 = JSON.parse(localStorage.getItem('BetterXcloud') || '{}');
+      var changed = false;
+      Object.keys(nat).forEach(function (k) {
+        if (!last || last[k] !== nat[k]) { cur2[k] = nat[k]; changed = true; }
+      });
+      if (changed) localStorage.setItem('BetterXcloud', JSON.stringify(cur2));
+      localStorage.setItem('cp.nativeQuality', JSON.stringify(nat));
+    } catch (e) {}
+
     // Faster artwork: game tiles and backgrounds download as smaller images.
     try {
       var bxs = JSON.parse(localStorage.getItem('BetterXcloud') || '{}');
@@ -234,15 +256,18 @@
     return res;
   }
 
-  if (!BX && ACTIVE) window.fetch = async function (input, init) {
+  if (ACTIVE) window.fetch = async function (input, init) {
     var url = typeof input === 'string' ? input : (input && input.url) || String(input);
     var path = url.split('?')[0];
 
-    if (isXhome(url)) return DIRECT_RP ? handleXhome(input, init, url, path) : origFetch.call(this, input, init);
+    // With the Advanced engine, it handles requests itself; here we only read the server list.
+    if (BX && !/\/v2\/login\/user/.test(path)) return origFetch.call(this, input, init);
+
+    if (!BX && isXhome(url)) return DIRECT_RP ? handleXhome(input, init, url, path) : origFetch.call(this, input, init);
 
     // Stream resolution for cloud games and Remote Play: the server picks quality
     // from the client's reported OS.
-    if (/\/sessions\/cloud\/play$/.test(path) && OS_NAMES[C.resolution]) {
+    if (!BX && /\/sessions\/cloud\/play$/.test(path) && OS_NAMES[C.resolution]) {
       try {
         var raw = await readBody(input, init);
         if (raw) {
@@ -264,7 +289,7 @@
         var regions = j && j.offeringSettings && j.offeringSettings.regions;
         if (regions && regions.length) {
           try { native() && native().setRegions(JSON.stringify(regions.map(function (x) { return x.name; }))); } catch (e) {}
-          if (C.region && C.region !== 'auto' && regions.some(function (x) { return x.name === C.region; })) {
+          if (!BX && C.region && C.region !== 'auto' && regions.some(function (x) { return x.name === C.region; })) {
             regions.forEach(function (x) { x.isDefault = x.name === C.region; });
             var h = new Headers(res.headers);
             h.delete('content-length');

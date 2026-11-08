@@ -91,8 +91,24 @@ public class SettingsActivity extends AppCompatActivity {
 
         private void applyEnabled(String engine, String preset) {
             boolean cp = "cloudplay".equals(engine);
-            Preference stream = findPreference("cat_stream");
-            if (stream != null) stream.setEnabled(cp);
+            // Quality settings work with both engines; only fit and stats are Basic-engine only
+            // (the Advanced engine has its own in the in-game Settings).
+            String note = "With the Advanced engine, change this in the in-game Settings";
+            ListPreference fit = findPreference("video_fit");
+            if (fit != null) {
+                fit.setEnabled(cp);
+                if (cp) {
+                    fit.setSummaryProvider(ListPreference.SimpleSummaryProvider.getInstance());
+                } else {
+                    fit.setSummaryProvider(null);
+                    fit.setSummary(note);
+                }
+            }
+            Preference stats = findPreference("show_stats");
+            if (stats != null) {
+                stats.setEnabled(cp);
+                stats.setSummary(cp ? "Resolution, FPS, ping, bitrate, packet loss and decode time" : note);
+            }
             Preference info = findPreference("bx_info");
             if (info != null) info.setVisible(!cp);
             boolean custom = "custom".equals(preset);

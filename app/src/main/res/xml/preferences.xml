@@ -39,12 +39,12 @@
         <Preference
             app:key="bx_info"
             app:title="Advanced settings"
-            app:summary="Resolution, codec, bitrate, server, upscaling (AMD FSR/CAS), stats, mouse and keyboard and more. Open them from the settings button at the top of the Xbox page."
+            app:summary="Upscaling, stats, mouse and keyboard and more are in the Settings next to your profile picture. Quality settings below work with both engines."
             app:selectable="false"
             app:iconSpaceReserved="false" />
     </PreferenceCategory>
 
-    <PreferenceCategory app:key="cat_stream" app:title="Stream quality (Basic engine)" app:iconSpaceReserved="false">
+    <PreferenceCategory app:key="cat_stream" app:title="Stream quality" app:iconSpaceReserved="false">
         <ListPreference
             app:key="resolution"
             app:title="Resolution"
