@@ -95,6 +95,29 @@
       localStorage.setItem('cp.nativeQuality', JSON.stringify(nat));
     } catch (e) {}
 
+    // Clarity boost with the Advanced engine runs on the GPU (WebGL2 + AMD CAS sharpening),
+    // which stays smooth at 1080p60. Off = the plain video player, the lightest option.
+    // Written when the preset changes in the app; in-game tweaks stay until it changes again.
+    try {
+      var key = [C.clarityPreset, C.sharpness, C.saturation, C.contrast, C.brightness].join('|');
+      if (localStorage.getItem('cp.lastClarity') !== key) {
+        var st = JSON.parse(localStorage.getItem('BetterXcloud.Stream') || '{}');
+        var clamp = function (v) { return Math.max(50, Math.min(150, parseInt(v, 10) || 100)); };
+        var sharp = Math.max(0, Math.min(10, parseInt(C.sharpness, 10) || 0));
+        var on = (C.clarityPreset || 'off') !== 'off';
+        st['video.player.type'] = on && sharp > 0 ? 'webgl2' : 'default';
+        st['video.player.powerPreference'] = 'high-performance';
+        st['video.processing'] = 'cas';
+        st['video.processing.mode'] = 'performance';
+        st['video.processing.sharpness'] = on ? sharp : 0;
+        st['video.saturation'] = on ? clamp(C.saturation) : 100;
+        st['video.contrast'] = on ? clamp(C.contrast) : 100;
+        st['video.brightness'] = on ? clamp(C.brightness) : 100;
+        localStorage.setItem('BetterXcloud.Stream', JSON.stringify(st));
+        localStorage.setItem('cp.lastClarity', key);
+      }
+    } catch (e) {}
+
     // Faster artwork: game tiles and backgrounds download as smaller images.
     try {
       var bxs = JSON.parse(localStorage.getItem('BetterXcloud') || '{}');
@@ -377,7 +400,7 @@
     var oldSvg = document.getElementById('cp-svg'); if (oldSvg) oldSvg.remove();
 
     var filters = [];
-    var lvl = parseInt(C.sharpness, 10) || 0;
+    var lvl = BX ? 0 : (parseInt(C.sharpness, 10) || 0);
     if (lvl > 0) {
       var f;
       if (C.clarityAlgo === 'unsharp') {
@@ -396,9 +419,9 @@
       document.body.appendChild(holder.firstChild);
       filters.push('url(#cp-sharpen)');
     }
-    if (C.saturation && C.saturation !== 100) filters.push('saturate(' + C.saturation / 100 + ')');
-    if (C.contrast && C.contrast !== 100) filters.push('contrast(' + C.contrast / 100 + ')');
-    if (C.brightness && C.brightness !== 100) filters.push('brightness(' + C.brightness / 100 + ')');
+    if (!BX && C.saturation && C.saturation !== 100) filters.push('saturate(' + C.saturation / 100 + ')');
+    if (!BX && C.contrast && C.contrast !== 100) filters.push('contrast(' + C.contrast / 100 + ')');
+    if (!BX && C.brightness && C.brightness !== 100) filters.push('brightness(' + C.brightness / 100 + ')');
 
     var style = document.createElement('style');
     style.id = 'cp-style';
@@ -481,15 +504,26 @@
     return out;
   }
 
+  // The app pushes controller changes here the moment they happen (window.__cpPads), so
+  // reading the controller (up to 250 times a second in-game) never waits on the app.
   var bridgeVer = -1, bridgeObjs = {};
-  function bridgePads() {
+  function bridgePads() { return bridgeObjs; }
+
+  function pullBridge() { // fallback/initial sync only
     var n = native();
-    if (inputMode === 'webview' || !n || !n.padVersion) return bridgeObjs;
+    if (inputMode === 'webview' || !n || !n.padVersion) return;
     var v = n.padVersion();
-    if (v === bridgeVer) return bridgeObjs;
+    if (v === bridgeVer) return;
+    try { applyBridge(v, JSON.parse(n.padState())); } catch (e) {}
+  }
+
+  window.__cpPads = function (v, arr) {
+    if (inputMode === 'webview') return;
+    applyBridge(v, arr);
+  };
+
+  function applyBridge(v, arr) {
     bridgeVer = v;
-    var arr;
-    try { arr = JSON.parse(n.padState()); } catch (e) { return bridgeObjs; }
     var seen = {};
     arr.forEach(function (p) {
       var o = bridgeObjs[p.i], isNew = !o;
@@ -521,7 +555,6 @@
         announce('gamepaddisconnected', o);
       }
     });
-    return bridgeObjs;
   }
 
   function realPadConnected() {
@@ -583,8 +616,9 @@
     } catch (e) {}
   }
 
-  // Pick up newly connected controllers even before the page starts polling.
-  setInterval(bridgePads, 500);
+  // Initial sync, plus a slow safety net in case a push was missed.
+  pullBridge();
+  setInterval(pullBridge, 1000);
 
   // ========================================================== quick access
   // Tell the app when a game is streaming (it hides the floating gear then).
@@ -800,6 +834,7 @@
       return { label: c[1], check: (C.clarityPreset || 'off') === c[0], go: function () {
         C.clarityPreset = c[0];
         try { native() && native().setClarity(c[0]); } catch (e) {}
+        if (BX) toast('Clarity boost applies when the next game starts');
         render('clarity', focusIdx);
       } };
     });
@@ -1019,6 +1054,7 @@
         C.clarityPreset = next;
         try { native() && native().setClarity(next); } catch (e) {}
         span.textContent = 'Clarity boost: ' + clarityName(next);
+        if (BX) toast('Clarity boost applies when the next game starts');
       }));
       sec.appendChild(bxButton('Show / hide touch controls', function () {
         closeBxDialog(); window.__cpTouch && __cpTouch.toggle();

@@ -583,19 +583,28 @@ public class MainActivity extends AppCompatActivity {
                 Display d = getWindowManager().getDefaultDisplay();
                 Display.Mode cur = d.getMode();
                 Display.Mode best = cur;
+                // Highest rate that's a multiple of 60 Hz (60/120/...), so 60 fps streams pace
+                // evenly with no judder; otherwise simply the highest.
+                Display.Mode best60 = null;
                 for (Display.Mode m : d.getSupportedModes()) {
-                    if (m.getPhysicalWidth() == cur.getPhysicalWidth()
-                            && m.getPhysicalHeight() == cur.getPhysicalHeight()
-                            && m.getRefreshRate() > best.getRefreshRate()) {
-                        best = m;
-                    }
+                    if (m.getPhysicalWidth() != cur.getPhysicalWidth()
+                            || m.getPhysicalHeight() != cur.getPhysicalHeight()) continue;
+                    if (m.getRefreshRate() > best.getRefreshRate()) best = m;
+                    float r = m.getRefreshRate();
+                    boolean mult60 = Math.abs(r / 60f - Math.round(r / 60f)) < 0.02f && r >= 59f;
+                    if (mult60 && (best60 == null || r > best60.getRefreshRate())) best60 = m;
                 }
+                if (best60 != null) best = best60;
                 modeId = best.getModeId();
             }
             if (lp.preferredDisplayModeId != modeId) {
                 lp.preferredDisplayModeId = modeId;
                 getWindow().setAttributes(lp);
             }
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            getWindow().setPreferMinimalPostProcessing(true); // game-mode on external displays/TVs
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -644,9 +653,27 @@ public class MainActivity extends AppCompatActivity {
                 || (src & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK;
     }
 
+    // Controller state is pushed to the page as soon as it changes (coalesced to one update
+    // per message-loop turn), so the game's controller reads never block on the app.
+    private int pushedPadVersion = -1;
+    private boolean padPushPending;
+    private final Runnable padPush = () -> {
+        padPushPending = false;
+        int v = gamepads.version();
+        if (v == pushedPadVersion || webView == null) return;
+        pushedPadVersion = v;
+        webView.evaluateJavascript("window.__cpPads&&__cpPads(" + v + "," + gamepads.state() + ")", null);
+    };
+
+    private void pushPads() {
+        if (padPushPending || gamepads.version() == pushedPadVersion) return;
+        padPushPending = true;
+        handler.postAtFrontOfQueue(padPush);
+    }
+
     @Override
     public boolean dispatchGenericMotionEvent(MotionEvent e) {
-        gamepads.onMotion(e);
+        if (gamepads.onMotion(e)) pushPads();
         return super.dispatchGenericMotionEvent(e);
     }
 
@@ -654,7 +681,7 @@ public class MainActivity extends AppCompatActivity {
     public boolean dispatchKeyEvent(KeyEvent e) {
         int code = e.getKeyCode();
         boolean fromPad = isFromGamepad(e);
-        if (fromPad) gamepads.onKey(e);
+        if (fromPad && gamepads.onKey(e)) pushPads();
 
         // Hold View/Select to open the CloudPlay menu.
         if (code == KeyEvent.KEYCODE_BUTTON_SELECT || (fromPad && code == KeyEvent.KEYCODE_BACK)) {
