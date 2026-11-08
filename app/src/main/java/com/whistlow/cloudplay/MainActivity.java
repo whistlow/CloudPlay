@@ -215,6 +215,8 @@ public class MainActivity extends AppCompatActivity {
     private View createGear() {
         gear = new android.widget.ImageButton(this);
         gear.setImageResource(R.drawable.ic_settings);
+        gear.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
+        gear.setPadding(dp(13), dp(13), dp(13), dp(13));
         android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
         bg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
         bg.setColor(0xD91C1C1C);

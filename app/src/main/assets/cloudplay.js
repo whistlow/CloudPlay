@@ -495,34 +495,12 @@
   // Tell the app when a game is streaming (it hides the floating gear then).
   var lastStreaming = null;
   setInterval(function () {
-    var on = streaming();
+    var on = streaming() || location.pathname.indexOf('/launch/') >= 0;
     if (on !== lastStreaming) {
       lastStreaming = on;
       try { native() && native().setStreaming(on); } catch (e) {}
     }
   }, 700);
-
-  // Put an "App settings" button at the top of Better xCloud's settings,
-  // in place of its "install the Android app" link.
-  if (BX) onReady(function () {
-    new MutationObserver(function () {
-      var top = document.querySelector('.bx-top-buttons');
-      if (!top || top.querySelector('.cp-app-settings')) return;
-      var ad = top.querySelector('a[href*="better-xcloud.github.io/android"]');
-      if (ad) ad.remove();
-      var b = document.createElement('button');
-      b.className = 'bx-button bx-full-width bx-focusable cp-app-settings';
-      b.tabIndex = 0;
-      var span = document.createElement('span');
-      span.textContent = '\u2699\uFE0F  App settings';
-      b.appendChild(span);
-      b.addEventListener('click', function (e) {
-        e.preventDefault(); e.stopPropagation();
-        try { native() && native().openSettings(); } catch (x) {}
-      });
-      top.insertBefore(b, top.firstChild);
-    }).observe(document.documentElement, { childList: true, subtree: true });
-  });
 
   // ================================================================ settings
   // A gear in the Xbox header (cloned from the site's own Search button so it matches),
@@ -577,7 +555,7 @@
       else btn.appendChild(gearSvg(null));
       btn.querySelectorAll('span').forEach(function (sp) { if (!sp.querySelector('svg')) sp.textContent = ''; });
       btn.addEventListener('click', function (e) {
-        e.preventDefault(); e.stopPropagation(); window.__cpMenu.open();
+        e.preventDefault(); e.stopPropagation(); openSettingsUi();
       }, true);
       search.parentNode.insertBefore(btn, search);
       existing = btn;
@@ -784,7 +762,81 @@
     setTimeout(function () { menuOpen = false; }, 200); // let the B press finish first
   }
 
-  window.__cpMenu = { open: open, close: close, toggle: function () { menuEl ? close() : open(); } };
+  window.__cpMenu = { open: open, close: close, toggle: function () { menuEl ? close() : openSettingsUi(); } };
+
+  // App options at the top of the Settings dialog, so there is one Settings everywhere
+  // (header gear, in-game gear, View/Back). Styled with the dialog's own button classes.
+  function closeBxDialog() {
+    var t = document.activeElement || document.body;
+    t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+  }
+
+  function clarityName(v) {
+    return (CLARITY.filter(function (c) { return c[0] === v; })[0] || CLARITY[0])[1];
+  }
+
+  function bxButton(label, onClick) {
+    var b = document.createElement('button');
+    b.className = 'bx-button bx-full-width bx-focusable cp-app-btn';
+    b.tabIndex = 0;
+    var span = document.createElement('span');
+    span.textContent = label;
+    b.appendChild(span);
+    b.addEventListener('click', function (e) {
+      e.preventDefault(); e.stopPropagation();
+      onClick(span);
+    });
+    return b;
+  }
+
+  if (BX) onReady(function () {
+    var st = document.createElement('style');
+    st.textContent = '.cp-app-section{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}' +
+      '.cp-app-section .cp-app-title{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;' +
+      'opacity:.7;margin:4px 2px 2px}';
+    document.head.appendChild(st);
+
+    new MutationObserver(function () {
+      var top = document.querySelector('.bx-top-buttons');
+      if (!top || top.querySelector('.cp-app-section')) return;
+      var ad = top.querySelector('a[href*="better-xcloud.github.io/android"]');
+      if (ad) ad.remove();
+
+      var sec = document.createElement('div');
+      sec.className = 'cp-app-section';
+      var title = document.createElement('div');
+      title.className = 'cp-app-title';
+      title.textContent = 'App';
+      sec.appendChild(title);
+      sec.appendChild(bxButton('App settings', function () {
+        closeBxDialog(); native() && native().openSettings();
+      }));
+      sec.appendChild(bxButton('Remote Play', function () {
+        closeBxDialog(); location.href = remotePlayUrl();
+      }));
+      sec.appendChild(bxButton('Clarity boost: ' + clarityName(C.clarityPreset || 'off'), function (span) {
+        var idx = CLARITY.findIndex(function (c) { return c[0] === (C.clarityPreset || 'off'); });
+        var next = CLARITY[(idx + 1) % CLARITY.length][0];
+        C.clarityPreset = next;
+        try { native() && native().setClarity(next); } catch (e) {}
+        span.textContent = 'Clarity boost: ' + clarityName(next);
+      }));
+      sec.appendChild(bxButton('Show / hide touch controls', function () {
+        closeBxDialog(); window.__cpTouch && __cpTouch.toggle();
+      }));
+      sec.appendChild(bxButton('Edit touch layout', function () {
+        closeBxDialog(); setTimeout(function () { window.__cpTouch && __cpTouch.edit(); }, 150);
+      }));
+      sec.appendChild(bxButton('Exit app', function () { native() && native().exitApp(); }));
+      top.insertBefore(sec, top.firstChild);
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  });
+
+  // One entry point for "open settings": the Settings dialog when available, else the panel.
+  function openSettingsUi() {
+    if (BX && window.__cpOpenBx && __cpOpenBx() === 'ok') return;
+    window.__cpMenu.open();
+  }
 
   // ================================================================ latency
   // Ask WebRTC for the smallest playout buffer: lower input-to-photon delay.
