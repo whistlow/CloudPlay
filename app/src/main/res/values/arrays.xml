@@ -96,7 +96,7 @@
 
     <string-array name="rumble_entries">
         <item>Off</item>
-        <item>Controller, phone if the controller can't</item>
+        <item>Controller, phone if the controller can\'t</item>
         <item>Controller only</item>
         <item>Phone only</item>
     </string-array>
