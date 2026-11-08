@@ -65,6 +65,8 @@ public class MainActivity extends AppCompatActivity {
     private volatile boolean streaming;
     private ScriptHandler scriptHandler;
     private String fallbackScript;
+    private String fallbackBx;
+    private ScriptHandler bxHandler;
     private String scriptBody;
     private String bxScript;
     private Rumbler rumbler;
@@ -117,7 +119,6 @@ public class MainActivity extends AppCompatActivity {
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) s.setOffscreenPreRaster(true);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);     // reuse cached site files between launches
         s.setGeolocationEnabled(false);
         s.setSaveFormData(false);
@@ -135,6 +136,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 if (fallbackScript != null) view.evaluateJavascript(fallbackScript, null);
+                if (fallbackBx != null) view.evaluateJavascript(fallbackBx, null);
             }
 
             @Override
@@ -145,6 +147,7 @@ public class MainActivity extends AppCompatActivity {
                     view.destroy();
                     webView = null;
                     scriptHandler = null;
+                    bxHandler = null;
                     createWebView(null);
                     Toast.makeText(MainActivity.this, "Browser restarted", Toast.LENGTH_SHORT).show();
                 }
@@ -254,28 +257,42 @@ public class MainActivity extends AppCompatActivity {
         gear.setAlpha("always".equals(mode) && streaming ? 0.45f : 1f);
     }
 
+    /**
+     * Two document-start scripts: the small app script (re-registered when settings change) and
+     * the large settings engine, registered once per WebView. Both skip hidden frames.
+     */
     private void installScript() {
         String js = "window.__CP_CFG=" + appliedConfig + ";\n" + scriptBody;
+        String bx = null;
         if (useBetterXcloud()) {
-            if (bxScript == null) bxScript = readAsset("better-xcloud/better-xcloud.user.js");
-            JSONObject flags = new JSONObject();
-            try {
-                JSONObject device = new JSONObject();
-                device.put("deviceType", "unknown");
-                device.put("userAgent", webView.getSettings().getUserAgentString());
-                flags.put("CheckForUpdate", false); // bundled copy; updated with the app
-                flags.put("DeviceInfo", device);
-            } catch (JSONException ignored) {
+            if (bxScript == null) {
+                JSONObject flags = new JSONObject();
+                try {
+                    JSONObject device = new JSONObject();
+                    device.put("deviceType", "unknown");
+                    device.put("userAgent", webView.getSettings().getUserAgentString());
+                    flags.put("CheckForUpdate", false); // bundled copy; updated with the app
+                    flags.put("DeviceInfo", device);
+                } catch (JSONException ignored) {
+                }
+                // Stop right away inside iframes: only the main page needs it.
+                bxScript = "\"use strict\";\nif (window.top !== window) throw 'skip-frame';\nwindow.BX_FLAGS="
+                        + flags + ";\n" + readAsset("better-xcloud/better-xcloud.user.js");
             }
-            js += "\n;window.BX_FLAGS=" + flags + ";\n" + bxScript;
+            bx = bxScript;
         }
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            java.util.Set<String> origins = Collections.singleton("https://*.xbox.com");
+            // Order matters: the app script runs before the engine.
             if (scriptHandler != null) scriptHandler.remove();
-            scriptHandler = WebViewCompat.addDocumentStartJavaScript(
-                    webView, js, Collections.singleton("https://*.xbox.com"));
+            if (bxHandler != null) { bxHandler.remove(); bxHandler = null; }
+            scriptHandler = WebViewCompat.addDocumentStartJavaScript(webView, js, origins);
+            if (bx != null) bxHandler = WebViewCompat.addDocumentStartJavaScript(webView, bx, origins);
             fallbackScript = null;
+            fallbackBx = null;
         } else {
             fallbackScript = js;
+            fallbackBx = bx;
         }
     }
 
@@ -443,7 +460,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void exitApp() {
-            runOnUiThread(MainActivity.this::finishAndRemoveTask);
+            runOnUiThread(() -> moveTaskToBack(true));
         }
 
         @JavascriptInterface
@@ -680,7 +697,7 @@ public class MainActivity extends AppCompatActivity {
          .section(R.drawable.ic_m_refresh, "Reload", () -> webView.reload())
          .add(R.drawable.ic_m_back, "Go back a page", () -> { if (webView.canGoBack()) webView.goBack(); })
          .add(R.drawable.ic_m_home, "Home", () -> webView.loadUrl(startUrl()))
-         .section(R.drawable.ic_m_exit, "Exit", this::finishAndRemoveTask);
+         .section(R.drawable.ic_m_exit, "Exit", () -> moveTaskToBack(true));
         menu = p.show(this::enterImmersive);
     }
 

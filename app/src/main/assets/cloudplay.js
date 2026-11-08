@@ -1,7 +1,7 @@
 // CloudPlay page script. Runs at document start on xbox.com and applies the app's settings.
 // window.__CP_CFG is prepended by the app.
 (function () {
-  if (window.__cpInstalled) return;
+  if (window.__cpInstalled || window.top !== window) return; // main page only
   if (!/(^|\.)xbox\.com$/.test(location.hostname)) return;
   window.__cpInstalled = true;
 
