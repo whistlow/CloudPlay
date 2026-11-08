@@ -12,7 +12,7 @@ A minimal Android app that opens https://www.xbox.com/en-us/play full-screen in 
 - **Performance:** low-latency video buffer, Android game mode, highest refresh rate, low-latency Wi-Fi, sustained performance mode
 - **CloudPlay engine** (if Better xCloud is off): its own resolution/codec/bitrate/region/stats settings
 
-Open the CloudPlay menu with Back, or hold View/Select for 1 second.
+Open the CloudPlay menu with the floating gear button (long-press it for settings), Back, or by holding View/Select for 1 second. Better xCloud's settings also have a CloudPlay app settings button.
 
 ## Credits
 Includes [Better xCloud](https://github.com/redphx/better-xcloud) 6.7.13 by redphx, MIT License

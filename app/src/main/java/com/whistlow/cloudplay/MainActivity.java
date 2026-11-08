@@ -61,6 +61,9 @@ public class MainActivity extends AppCompatActivity {
     private static final long MENU_HOLD_MS = 1000;
 
     private WebView webView;
+    private android.widget.FrameLayout root;
+    private android.widget.ImageButton gear;
+    private volatile boolean streaming;
     private ScriptHandler scriptHandler;
     private String fallbackScript;
     private String scriptBody;
@@ -135,8 +138,7 @@ public class MainActivity extends AppCompatActivity {
             public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
                 // Renderer crashed or was killed for memory: rebuild instead of crashing the app.
                 if (view == webView) {
-                    ViewGroup parent = (ViewGroup) view.getParent();
-                    if (parent != null) parent.removeView(view);
+                    if (root != null) root.removeAllViews();
                     view.destroy();
                     webView = null;
                     scriptHandler = null;
@@ -153,7 +155,13 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        setContentView(webView);
+        root = new android.widget.FrameLayout(this);
+        root.setBackgroundColor(0xFF000000);
+        root.addView(webView, new android.widget.FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        root.addView(createGear());
+        setContentView(root);
+        updateGear();
         webView.requestFocus();
 
         appliedConfig = buildConfig();
@@ -195,6 +203,48 @@ public class MainActivity extends AppCompatActivity {
                     new UserAgentMetadata.Builder(cur).setBrandVersionList(list).build());
         } catch (Exception ignored) {
         }
+    }
+
+    // ------------------------------------------------- floating settings button
+
+    private int dp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
+    }
+
+    private View createGear() {
+        gear = new android.widget.ImageButton(this);
+        gear.setImageResource(R.drawable.ic_settings);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(0xE6005B7F);
+        bg.setCornerRadius(dp(16));
+        gear.setBackground(bg);
+        gear.setFocusable(false);           // keep controller focus on the game
+        gear.setContentDescription("CloudPlay settings");
+        gear.setElevation(dp(6));
+        gear.setOnClickListener(v -> showMenu());
+        gear.setOnLongClickListener(v -> {
+            startActivity(new Intent(this, SettingsActivity.class));
+            return true;
+        });
+        return gear;
+    }
+
+    /** Position and show/hide the gear according to settings and whether a game is streaming. */
+    private void updateGear() {
+        if (gear == null) return;
+        SharedPreferences p = prefs();
+        String mode = p.getString("settings_button", "auto");
+        boolean show = "always".equals(mode) || ("auto".equals(mode) && !streaming);
+        gear.setVisibility(show ? View.VISIBLE : View.GONE);
+
+        String pos = p.getString("settings_button_pos", "bottom_right");
+        int g = (pos.startsWith("top") ? android.view.Gravity.TOP : android.view.Gravity.BOTTOM)
+                | (pos.endsWith("left") ? android.view.Gravity.START : android.view.Gravity.END);
+        android.widget.FrameLayout.LayoutParams lp =
+                new android.widget.FrameLayout.LayoutParams(dp(56), dp(56), g);
+        lp.setMargins(dp(16), dp(16), dp(16), dp(16));
+        gear.setLayoutParams(lp);
+        gear.setAlpha("always".equals(mode) && streaming ? 0.45f : 1f);
     }
 
     private void installScript() {
@@ -355,6 +405,22 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
+        public void setStreaming(boolean on) {
+            streaming = on;
+            runOnUiThread(MainActivity.this::updateGear);
+        }
+
+        @JavascriptInterface
+        public void openSettings() {
+            runOnUiThread(() -> startActivity(new Intent(MainActivity.this, SettingsActivity.class)));
+        }
+
+        @JavascriptInterface
+        public void openMenu() {
+            runOnUiThread(MainActivity.this::showMenu);
+        }
+
+        @JavascriptInterface
         public int padVersion() {
             return gamepads.version();
         }
@@ -405,6 +471,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         applyPerformance();
+        updateGear();
         InputManager im = (InputManager) getSystemService(Context.INPUT_SERVICE);
         if (im != null) im.registerInputDeviceListener(gamepads, handler);
         enterImmersive();

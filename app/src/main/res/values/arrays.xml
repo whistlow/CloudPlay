@@ -128,4 +128,28 @@
         <item>bridge</item>
         <item>webview</item>
     </string-array>
+
+    <string-array name="gear_entries">
+        <item>Show, hide while playing</item>
+        <item>Always show (faded while playing)</item>
+        <item>Off</item>
+    </string-array>
+    <string-array name="gear_values">
+        <item>auto</item>
+        <item>always</item>
+        <item>off</item>
+    </string-array>
+
+    <string-array name="gear_pos_entries">
+        <item>Bottom right</item>
+        <item>Bottom left</item>
+        <item>Top right</item>
+        <item>Top left</item>
+    </string-array>
+    <string-array name="gear_pos_values">
+        <item>bottom_right</item>
+        <item>bottom_left</item>
+        <item>top_right</item>
+        <item>top_left</item>
+    </string-array>
 </resources>

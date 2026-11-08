@@ -2,6 +2,31 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
+    <PreferenceCategory app:title="Quick access" app:iconSpaceReserved="false">
+        <ListPreference
+            app:key="settings_button"
+            app:title="Floating settings button"
+            app:entries="@array/gear_entries"
+            app:entryValues="@array/gear_values"
+            app:defaultValue="auto"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+        <ListPreference
+            app:key="settings_button_pos"
+            app:title="Button position"
+            app:entries="@array/gear_pos_entries"
+            app:entryValues="@array/gear_pos_values"
+            app:defaultValue="bottom_right"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+        <Preference
+            app:key="help"
+            app:title="Other ways in"
+            app:summary="Tap the gear for the menu, or long-press it for settings. Hold View/Select for 1 second, or press Back. In Better xCloud's settings, tap CloudPlay app settings."
+            app:selectable="false"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="Engine" app:iconSpaceReserved="false">
         <ListPreference
             app:key="engine"
@@ -211,12 +236,6 @@
             app:title="Start page"
             app:defaultValue="https://www.xbox.com/en-us/play"
             app:useSimpleSummaryProvider="true"
-            app:iconSpaceReserved="false" />
-        <Preference
-            app:key="help"
-            app:title="Opening the CloudPlay menu"
-            app:summary="Press Back, or hold the View/Select button for 1 second"
-            app:selectable="false"
             app:iconSpaceReserved="false" />
         <Preference
             app:key="reset"

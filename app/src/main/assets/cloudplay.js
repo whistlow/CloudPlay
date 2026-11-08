@@ -449,6 +449,39 @@
   // Pick up newly connected controllers even before the page starts polling.
   setInterval(bridgePads, 500);
 
+  // ========================================================== quick access
+  // Tell the app when a game is streaming (it hides the floating gear then).
+  var lastStreaming = null;
+  setInterval(function () {
+    var on = streaming();
+    if (on !== lastStreaming) {
+      lastStreaming = on;
+      try { native() && native().setStreaming(on); } catch (e) {}
+    }
+  }, 700);
+
+  // Put a "CloudPlay app settings" button at the top of Better xCloud's settings,
+  // in place of its "install the Android app" link.
+  if (BX) onReady(function () {
+    new MutationObserver(function () {
+      var top = document.querySelector('.bx-top-buttons');
+      if (!top || top.querySelector('.cp-app-settings')) return;
+      var ad = top.querySelector('a[href*="better-xcloud.github.io/android"]');
+      if (ad) ad.remove();
+      var b = document.createElement('button');
+      b.className = 'bx-button bx-full-width bx-focusable cp-app-settings';
+      b.tabIndex = 0;
+      var span = document.createElement('span');
+      span.textContent = '\u2699\uFE0F  CloudPlay app settings';
+      b.appendChild(span);
+      b.addEventListener('click', function (e) {
+        e.preventDefault(); e.stopPropagation();
+        try { native() && native().openSettings(); } catch (x) {}
+      });
+      top.insertBefore(b, top.firstChild);
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  });
+
   // ================================================================ latency
   // Ask WebRTC for the smallest playout buffer: lower input-to-photon delay.
   if (C.lowLatency !== false) {
