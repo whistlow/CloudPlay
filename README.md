@@ -2,15 +2,20 @@
 
 A minimal Android app that opens https://www.xbox.com/en-us/play full-screen in landscape.
 
-## Settings
-Press Back (or hold View/Select on your controller for 1 second) to open the menu, then **Settings**:
+## Features
+- **Better xCloud built in** (switchable engine): resolution, codec, bitrate, server region, AMD FSR/CAS upscaling, stats, mouse and keyboard and more, from Better xCloud's own settings
+- **Remote Play** to your own Xbox, from the CloudPlay menu
+- **Controller rumble** on your controller's motors, or on the phone as a fallback
+- **Clarity boost** presets (Low / Medium / High / Vivid) or custom sharpen/unsharp-mask sliders, which switch live during a game
+- **Touch controls** you can drag and resize in-game (Edit touch layout)
+- **Performance:** highest refresh rate, low-latency Wi-Fi, sustained performance mode
+- **CloudPlay engine** (if Better xCloud is off): its own resolution/codec/bitrate/region/stats settings
 
-- **Stream quality:** resolution (720p / 1080p / 1080p high quality), H.264 profile, max bitrate, server region
-- **Picture:** fit/zoom/stretch, sharpness, saturation, contrast, brightness
-- **Performance:** highest refresh rate, low-latency Wi-Fi, sustained performance mode, stream stats overlay
-- **App:** start page, reset settings, sign out and clear data
+Open the CloudPlay menu with Back, or hold View/Select for 1 second.
 
-Stream settings are applied by reloading the page when you leave Settings.
+## Credits
+Includes [Better xCloud](https://github.com/redphx/better-xcloud) 6.7.13 by redphx, MIT License
+(see `app/src/main/assets/better-xcloud/LICENSE`).
 
 ## Get the APK
 Latest build: https://github.com/whistlow/CloudPlay/releases/download/latest/cloudplay-debug.apk

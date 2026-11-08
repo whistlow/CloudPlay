@@ -2,7 +2,24 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <PreferenceCategory app:title="Stream quality" app:iconSpaceReserved="false">
+    <PreferenceCategory app:title="Engine" app:iconSpaceReserved="false">
+        <ListPreference
+            app:key="engine"
+            app:title="Streaming engine"
+            app:entries="@array/engine_entries"
+            app:entryValues="@array/engine_values"
+            app:defaultValue="betterxcloud"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+        <Preference
+            app:key="bx_info"
+            app:title="Better xCloud settings"
+            app:summary="Resolution, codec, bitrate, server, upscaling (AMD FSR/CAS), stats, mouse and keyboard and more. Open them from the CloudPlay menu, or the Better xCloud button at the top of the Xbox page."
+            app:selectable="false"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:key="cat_stream" app:title="Stream quality (CloudPlay engine)" app:iconSpaceReserved="false">
         <ListPreference
             app:key="resolution"
             app:title="Resolution"
@@ -32,9 +49,6 @@
             app:title="Server region"
             app:defaultValue="auto"
             app:iconSpaceReserved="false" />
-    </PreferenceCategory>
-
-    <PreferenceCategory app:title="Picture" app:iconSpaceReserved="false">
         <ListPreference
             app:key="video_fit"
             app:title="Screen fit"
@@ -43,10 +57,34 @@
             app:defaultValue="contain"
             app:useSimpleSummaryProvider="true"
             app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat
+            app:key="show_stats"
+            app:title="Show stream stats"
+            app:summary="Resolution, FPS, ping, bitrate, packet loss and decode time"
+            app:defaultValue="false"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Clarity boost" app:iconSpaceReserved="false">
+        <ListPreference
+            app:key="clarity_preset"
+            app:title="Preset"
+            app:entries="@array/clarity_entries"
+            app:entryValues="@array/clarity_values"
+            app:defaultValue="off"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+        <ListPreference
+            app:key="clarity_algo"
+            app:title="Algorithm"
+            app:entries="@array/algo_entries"
+            app:entryValues="@array/algo_values"
+            app:defaultValue="sharpen"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
         <SeekBarPreference
             app:key="sharpness"
             app:title="Sharpness"
-            app:summary="0 = off. Uses a little extra GPU."
             android:max="10"
             app:min="0"
             app:defaultValue="0"
@@ -81,6 +119,57 @@
             app:iconSpaceReserved="false" />
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="Controls" app:iconSpaceReserved="false">
+        <ListPreference
+            app:key="rumble"
+            app:title="Rumble"
+            app:entries="@array/rumble_entries"
+            app:entryValues="@array/rumble_values"
+            app:defaultValue="auto"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+        <SeekBarPreference
+            app:key="rumble_strength"
+            app:title="Rumble strength (%)"
+            android:max="100"
+            app:min="10"
+            app:seekBarIncrement="10"
+            app:defaultValue="100"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+        <ListPreference
+            app:key="touch_mode"
+            app:title="CloudPlay touch controls"
+            app:entries="@array/touch_entries"
+            app:entryValues="@array/touch_values"
+            app:defaultValue="auto"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+        <SeekBarPreference
+            app:key="touch_opacity"
+            app:title="Touch controls opacity (%)"
+            android:max="100"
+            app:min="10"
+            app:seekBarIncrement="5"
+            app:defaultValue="60"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+        <SeekBarPreference
+            app:key="touch_size"
+            app:title="Touch controls size (%)"
+            android:max="150"
+            app:min="50"
+            app:seekBarIncrement="5"
+            app:defaultValue="100"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+        <Preference
+            app:key="touch_reset"
+            app:title="Reset touch layout"
+            app:summary="To move or resize buttons, use Edit touch layout in the CloudPlay menu during a game"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="Performance" app:iconSpaceReserved="false">
         <SwitchPreferenceCompat
             app:key="max_refresh"
@@ -100,12 +189,6 @@
             app:summary="Steadier clocks for long sessions, if your device supports it"
             app:defaultValue="false"
             app:iconSpaceReserved="false" />
-        <SwitchPreferenceCompat
-            app:key="show_stats"
-            app:title="Show stream stats"
-            app:summary="Resolution, FPS, ping, bitrate, packet loss and decode time"
-            app:defaultValue="false"
-            app:iconSpaceReserved="false" />
     </PreferenceCategory>
 
     <PreferenceCategory app:title="App" app:iconSpaceReserved="false">
@@ -117,7 +200,7 @@
             app:iconSpaceReserved="false" />
         <Preference
             app:key="help"
-            app:title="Opening this menu"
+            app:title="Opening the CloudPlay menu"
             app:summary="Press Back, or hold the View/Select button for 1 second"
             app:selectable="false"
             app:iconSpaceReserved="false" />
@@ -128,7 +211,13 @@
         <Preference
             app:key="clear_data"
             app:title="Sign out and clear data"
-            app:summary="Removes cookies, cache and saved logins"
+            app:summary="Removes cookies, cache, saved logins and Better xCloud settings"
+            app:iconSpaceReserved="false" />
+        <Preference
+            app:key="about_bx"
+            app:title="Credits"
+            app:summary="Includes Better xCloud 6.7.13 by redphx (MIT License), github.com/redphx/better-xcloud"
+            app:selectable="false"
             app:iconSpaceReserved="false" />
     </PreferenceCategory>
 </PreferenceScreen>

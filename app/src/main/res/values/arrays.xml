@@ -58,4 +58,63 @@
         <item>cover</item>
         <item>fill</item>
     </string-array>
+
+    <string-array name="engine_entries">
+        <item>Better xCloud (full feature set, in-page settings)</item>
+        <item>CloudPlay only (settings below)</item>
+    </string-array>
+    <string-array name="engine_values">
+        <item>betterxcloud</item>
+        <item>cloudplay</item>
+    </string-array>
+
+    <string-array name="clarity_entries">
+        <item>Off</item>
+        <item>Low</item>
+        <item>Medium</item>
+        <item>High</item>
+        <item>Vivid</item>
+        <item>Custom (sliders below)</item>
+    </string-array>
+    <string-array name="clarity_values">
+        <item>off</item>
+        <item>low</item>
+        <item>medium</item>
+        <item>high</item>
+        <item>vivid</item>
+        <item>custom</item>
+    </string-array>
+
+    <string-array name="algo_entries">
+        <item>Sharpen (crisp edges)</item>
+        <item>Unsharp mask (natural detail)</item>
+    </string-array>
+    <string-array name="algo_values">
+        <item>sharpen</item>
+        <item>unsharp</item>
+    </string-array>
+
+    <string-array name="rumble_entries">
+        <item>Off</item>
+        <item>Controller, phone if the controller can't</item>
+        <item>Controller only</item>
+        <item>Phone only</item>
+    </string-array>
+    <string-array name="rumble_values">
+        <item>off</item>
+        <item>auto</item>
+        <item>controller</item>
+        <item>phone</item>
+    </string-array>
+
+    <string-array name="touch_entries">
+        <item>Off</item>
+        <item>Auto (when no controller is connected)</item>
+        <item>Always during a stream</item>
+    </string-array>
+    <string-array name="touch_values">
+        <item>off</item>
+        <item>auto</item>
+        <item>always</item>
+    </string-array>
 </resources>

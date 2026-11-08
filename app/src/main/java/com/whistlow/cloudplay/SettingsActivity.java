@@ -44,6 +44,36 @@ public class SettingsActivity extends AppCompatActivity {
             setPreferencesFromResource(R.xml.preferences, rootKey);
             setupRegions();
             setupActions();
+            setupDependencies();
+        }
+
+        /** Grey out settings that the current engine or clarity preset doesn't use. */
+        private void setupDependencies() {
+            ListPreference engine = findPreference("engine");
+            ListPreference preset = findPreference("clarity_preset");
+            if (engine != null) engine.setOnPreferenceChangeListener((p, v) -> {
+                applyEnabled((String) v, preset != null ? preset.getValue() : "off");
+                return true;
+            });
+            if (preset != null) preset.setOnPreferenceChangeListener((p, v) -> {
+                applyEnabled(engine != null ? engine.getValue() : "betterxcloud", (String) v);
+                return true;
+            });
+            applyEnabled(engine != null ? engine.getValue() : "betterxcloud",
+                    preset != null ? preset.getValue() : "off");
+        }
+
+        private void applyEnabled(String engine, String preset) {
+            boolean cp = "cloudplay".equals(engine);
+            Preference stream = findPreference("cat_stream");
+            if (stream != null) stream.setEnabled(cp);
+            Preference info = findPreference("bx_info");
+            if (info != null) info.setVisible(!cp);
+            boolean custom = "custom".equals(preset);
+            for (String k : new String[]{"clarity_algo", "sharpness", "saturation", "contrast", "brightness"}) {
+                Preference p = findPreference(k);
+                if (p != null) p.setEnabled(custom);
+            }
         }
 
         private void setupRegions() {
@@ -89,6 +119,14 @@ public class SettingsActivity extends AppCompatActivity {
                         })
                         .setNegativeButton("Cancel", null)
                         .show();
+                return true;
+            });
+
+            Preference touchReset = findPreference("touch_reset");
+            if (touchReset != null) touchReset.setOnPreferenceClickListener(p -> {
+                PreferenceManager.getDefaultSharedPreferences(requireContext())
+                        .edit().remove("touch_layout").apply();
+                Toast.makeText(requireContext(), "Touch layout reset", Toast.LENGTH_SHORT).show();
                 return true;
             });
 

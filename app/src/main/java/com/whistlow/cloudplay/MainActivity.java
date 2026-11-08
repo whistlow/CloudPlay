@@ -60,6 +60,8 @@ public class MainActivity extends AppCompatActivity {
     private ScriptHandler scriptHandler;
     private String fallbackScript;
     private String scriptBody;
+    private String bxScript;
+    private Rumbler rumbler;
     private String appliedConfig;
     private String appliedUrl;
     private WifiManager.WifiLock wifiLock;
@@ -73,6 +75,7 @@ public class MainActivity extends AppCompatActivity {
         PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         scriptBody = readAsset("cloudplay.js");
+        rumbler = new Rumbler(this);
 
         createWebView(savedInstanceState);
 
@@ -155,8 +158,25 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private boolean useBetterXcloud() {
+        return "betterxcloud".equals(prefs().getString("engine", "betterxcloud"));
+    }
+
     private void installScript() {
         String js = "window.__CP_CFG=" + appliedConfig + ";\n" + scriptBody;
+        if (useBetterXcloud()) {
+            if (bxScript == null) bxScript = readAsset("better-xcloud/better-xcloud.user.js");
+            JSONObject flags = new JSONObject();
+            try {
+                JSONObject device = new JSONObject();
+                device.put("deviceType", "unknown");
+                device.put("userAgent", webView.getSettings().getUserAgentString());
+                flags.put("CheckForUpdate", false); // bundled copy; updated with the app
+                flags.put("DeviceInfo", device);
+            } catch (JSONException ignored) {
+            }
+            js += "\n;window.BX_FLAGS=" + flags + ";\n" + bxScript;
+        }
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             if (scriptHandler != null) scriptHandler.remove();
             scriptHandler = WebViewCompat.addDocumentStartJavaScript(
@@ -188,14 +208,66 @@ public class MainActivity extends AppCompatActivity {
             o.put("maxBitrate", parseInt(p.getString("max_bitrate", "0")));
             o.put("region", p.getString("region", "auto"));
             o.put("videoFit", p.getString("video_fit", "contain"));
-            o.put("sharpness", p.getInt("sharpness", 0));
-            o.put("saturation", p.getInt("saturation", 100));
-            o.put("contrast", p.getInt("contrast", 100));
-            o.put("brightness", p.getInt("brightness", 100));
             o.put("showStats", p.getBoolean("show_stats", false));
+            o.put("engine", p.getString("engine", "betterxcloud"));
+            JSONObject v = videoConfig();
+            for (java.util.Iterator<String> it = v.keys(); it.hasNext(); ) {
+                String k = it.next();
+                o.put(k, v.get(k));
+            }
+            o.put("rumble", p.getString("rumble", "auto"));
+            o.put("touchMode", p.getString("touch_mode", "auto"));
+            o.put("touchOpacity", p.getInt("touch_opacity", 60));
+            o.put("touchSize", p.getInt("touch_size", 100));
+            o.put("touchLayout", p.getString("touch_layout", ""));
         } catch (JSONException ignored) {
         }
         return o.toString();
+    }
+
+    /** Clarity boost: a preset, or the custom sliders. */
+    private JSONObject videoConfig() {
+        SharedPreferences p = prefs();
+        String preset = p.getString("clarity_preset", "off");
+        String algo;
+        int sharp, sat, con, bri;
+        switch (preset) {
+            case "low":    algo = "unsharp"; sharp = 3; sat = 100; con = 102; bri = 100; break;
+            case "medium": algo = "unsharp"; sharp = 5; sat = 105; con = 105; bri = 100; break;
+            case "high":   algo = "sharpen"; sharp = 7; sat = 108; con = 108; bri = 100; break;
+            case "vivid":  algo = "unsharp"; sharp = 4; sat = 125; con = 110; bri = 102; break;
+            case "custom":
+                algo = p.getString("clarity_algo", "sharpen");
+                sharp = p.getInt("sharpness", 0);
+                sat = p.getInt("saturation", 100);
+                con = p.getInt("contrast", 100);
+                bri = p.getInt("brightness", 100);
+                break;
+            default:       algo = "sharpen"; sharp = 0; sat = 100; con = 100; bri = 100; break;
+        }
+        JSONObject o = new JSONObject();
+        try {
+            o.put("clarityAlgo", algo);
+            o.put("sharpness", sharp);
+            o.put("saturation", sat);
+            o.put("contrast", con);
+            o.put("brightness", bri);
+        } catch (JSONException ignored) {
+        }
+        return o;
+    }
+
+    /** Save a changed setting that the page can apply live, without reloading. */
+    private void refreshScriptWithoutReload() {
+        appliedConfig = buildConfig();
+        installScript();
+    }
+
+    private String remotePlayUrl() {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("^(https://www\\.xbox\\.com/[a-zA-Z]{2}-[a-zA-Z]{2})/play")
+                .matcher(startUrl());
+        return (m.find() ? m.group(1) : "https://www.xbox.com/en-US") + "/play/consoles";
     }
 
     private static int parseInt(String s) {
@@ -239,6 +311,25 @@ public class MainActivity extends AppCompatActivity {
             } catch (JSONException ignored) {
             }
         }
+
+        @JavascriptInterface
+        public void rumble(int durationMs, double strong, double weak) {
+            rumbler.play(durationMs, strong, weak);
+        }
+
+        @JavascriptInterface
+        public void stopRumble() {
+            rumbler.stop();
+        }
+
+        @JavascriptInterface
+        public void saveTouchLayout(String json) {
+            runOnUiThread(() -> {
+                prefs().edit().putString("touch_layout", json).apply();
+                if (webView != null) refreshScriptWithoutReload();
+                Toast.makeText(MainActivity.this, "Touch layout saved", Toast.LENGTH_SHORT).show();
+            });
+        }
     }
 
     // ------------------------------------------------------------- lifecycle
@@ -275,6 +366,7 @@ public class MainActivity extends AppCompatActivity {
         super.onPause();
         handler.removeCallbacks(showMenuRunnable);
         releaseWifiLock();
+        rumbler.stop();
         CookieManager.getInstance().flush();
     }
 
@@ -324,6 +416,9 @@ public class MainActivity extends AppCompatActivity {
                 getWindow().setSustainedPerformanceMode(p.getBoolean("sustained_perf", false));
             }
         }
+
+        rumbler.mode = p.getString("rumble", "auto");
+        rumbler.strengthPct = p.getInt("rumble_strength", 100);
 
         if (p.getBoolean("wifi_low_latency", true)) acquireWifiLock();
         else releaseWifiLock();
@@ -386,31 +481,63 @@ public class MainActivity extends AppCompatActivity {
 
     private void showMenu() {
         if (isFinishing() || (menu != null && menu.isShowing())) return;
-        String[] items = {"Settings", "Reload", "Go back a page", "Home", "Exit"};
+        final boolean bx = useBetterXcloud();
+        java.util.List<String> labels = new java.util.ArrayList<>();
+        java.util.List<Runnable> actions = new java.util.ArrayList<>();
+
+        labels.add("Settings");
+        actions.add(() -> startActivity(new Intent(this, SettingsActivity.class)));
+        if (bx) {
+            labels.add("Better xCloud settings");
+            actions.add(() -> webView.evaluateJavascript("window.__cpOpenBx ? __cpOpenBx() : 'missing'", r -> {
+                if (r == null || r.contains("missing")) {
+                    Toast.makeText(this, "Open it from the Xbox page header, or the in-game guide menu",
+                            Toast.LENGTH_LONG).show();
+                }
+            }));
+        }
+        labels.add("Remote Play (my Xbox)");
+        actions.add(() -> webView.loadUrl(remotePlayUrl()));
+        labels.add("Clarity boost…");
+        actions.add(this::showClarityMenu);
+        labels.add("Show / hide touch controls");
+        actions.add(() -> webView.evaluateJavascript("window.__cpTouch && __cpTouch.toggle()", null));
+        labels.add("Edit touch layout");
+        actions.add(() -> webView.evaluateJavascript("window.__cpTouch && __cpTouch.edit()", null));
+        labels.add("Reload");
+        actions.add(() -> webView.reload());
+        labels.add("Go back a page");
+        actions.add(() -> { if (webView.canGoBack()) webView.goBack(); });
+        labels.add("Home");
+        actions.add(() -> webView.loadUrl(startUrl()));
+        labels.add("Exit");
+        actions.add(this::finishAndRemoveTask);
+
         menu = new AlertDialog.Builder(this)
                 .setTitle("CloudPlay")
-                .setItems(items, (d, which) -> {
-                    switch (which) {
-                        case 0:
-                            startActivity(new Intent(this, SettingsActivity.class));
-                            break;
-                        case 1:
-                            webView.reload();
-                            break;
-                        case 2:
-                            if (webView.canGoBack()) webView.goBack();
-                            break;
-                        case 3:
-                            webView.loadUrl(startUrl());
-                            break;
-                        case 4:
-                            finishAndRemoveTask();
-                            break;
-                    }
-                })
+                .setItems(labels.toArray(new String[0]), (d, which) -> actions.get(which).run())
                 .create();
         menu.setOnDismissListener(d -> enterImmersive());
         menu.show();
+    }
+
+    private void showClarityMenu() {
+        final String[] names = getResources().getStringArray(R.array.clarity_entries);
+        final String[] values = getResources().getStringArray(R.array.clarity_values);
+        String cur = prefs().getString("clarity_preset", "off");
+        int checked = java.util.Arrays.asList(values).indexOf(cur);
+        AlertDialog d = new AlertDialog.Builder(this)
+                .setTitle("Clarity boost")
+                .setSingleChoiceItems(names, checked, (dlg, which) -> {
+                    prefs().edit().putString("clarity_preset", values[which]).apply();
+                    refreshScriptWithoutReload();
+                    webView.evaluateJavascript(
+                            "window.__cpSetVideo && __cpSetVideo(" + videoConfig() + ")", null);
+                    dlg.dismiss();
+                })
+                .create();
+        d.setOnDismissListener(x -> enterImmersive());
+        d.show();
     }
 
     // ------------------------------------------------------------ fullscreen
