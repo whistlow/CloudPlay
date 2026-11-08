@@ -1,4 +1,4 @@
 <resources>
     <string name="app_name">CloudPlay</string>
-    <string name="settings_title">CloudPlay settings</string>
+    <string name="settings_title">Settings</string>
 </resources>

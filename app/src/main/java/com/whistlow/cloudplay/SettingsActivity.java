@@ -32,12 +32,38 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            getWindow().getDecorView().setSystemUiVisibility(
+                    android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        }
+    }
+
+    @Override
     public boolean onSupportNavigateUp() {
         finish();
         return true;
     }
 
     public static class SettingsFragment extends PreferenceFragmentCompat {
+
+        @Override
+        public void onViewCreated(@androidx.annotation.NonNull android.view.View view, Bundle savedInstanceState) {
+            super.onViewCreated(view, savedInstanceState);
+            setDivider(null);
+            // Keep settings in a readable centered column on wide landscape screens.
+            androidx.recyclerview.widget.RecyclerView list = getListView();
+            float density = getResources().getDisplayMetrics().density;
+            int width = getResources().getDisplayMetrics().widthPixels;
+            int column = Math.round(720 * density);
+            int side = Math.max(Math.round(8 * density), (width - column) / 2);
+            list.setPadding(side, Math.round(8 * density), side, Math.round(32 * density));
+            list.setClipToPadding(false);
+        }
 
         @Override
         public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {

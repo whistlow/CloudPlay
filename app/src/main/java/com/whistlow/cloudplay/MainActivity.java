@@ -32,7 +32,6 @@ import android.webkit.WebViewClient;
 import android.widget.Toast;
 
 import androidx.activity.OnBackPressedCallback;
-import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.preference.PreferenceManager;
 import androidx.webkit.ScriptHandler;
@@ -73,7 +72,8 @@ public class MainActivity extends AppCompatActivity {
     private String appliedConfig;
     private String appliedUrl;
     private WifiManager.WifiLock wifiLock;
-    private AlertDialog menu;
+    private android.app.Dialog menu;
+    private View splash;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable showMenuRunnable = this::showMenu;
 
@@ -150,6 +150,11 @@ public class MainActivity extends AppCompatActivity {
         });
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
+            public void onProgressChanged(WebView view, int progress) {
+                if (progress >= 85) hideSplash();
+            }
+
+            @Override
             public void onPermissionRequest(PermissionRequest request) {
                 request.grant(request.getResources());
             }
@@ -160,6 +165,12 @@ public class MainActivity extends AppCompatActivity {
         root.addView(webView, new android.widget.FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         root.addView(createGear());
+        if (state == null) {
+            splash = createSplash();
+            root.addView(splash, new android.widget.FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            handler.postDelayed(this::hideSplash, 12000); // never block for long
+        }
         setContentView(root);
         updateGear();
         webView.requestFocus();
@@ -215,8 +226,9 @@ public class MainActivity extends AppCompatActivity {
         gear = new android.widget.ImageButton(this);
         gear.setImageResource(R.drawable.ic_settings);
         android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
-        bg.setColor(0xE6005B7F);
-        bg.setCornerRadius(dp(16));
+        bg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        bg.setColor(0xD91C1C1C);
+        bg.setStroke(dp(1), 0x40FFFFFF);
         gear.setBackground(bg);
         gear.setFocusable(false);           // keep controller focus on the game
         gear.setContentDescription("CloudPlay settings");
@@ -241,7 +253,7 @@ public class MainActivity extends AppCompatActivity {
         int g = (pos.startsWith("top") ? android.view.Gravity.TOP : android.view.Gravity.BOTTOM)
                 | (pos.endsWith("left") ? android.view.Gravity.START : android.view.Gravity.END);
         android.widget.FrameLayout.LayoutParams lp =
-                new android.widget.FrameLayout.LayoutParams(dp(56), dp(56), g);
+                new android.widget.FrameLayout.LayoutParams(dp(52), dp(52), g);
         lp.setMargins(dp(16), dp(16), dp(16), dp(16));
         gear.setLayoutParams(lp);
         gear.setAlpha("always".equals(mode) && streaming ? 0.45f : 1f);
@@ -610,62 +622,101 @@ public class MainActivity extends AppCompatActivity {
     private void showMenu() {
         if (isFinishing() || (menu != null && menu.isShowing())) return;
         final boolean bx = useBetterXcloud();
-        java.util.List<String> labels = new java.util.ArrayList<>();
-        java.util.List<Runnable> actions = new java.util.ArrayList<>();
+        String preset = prefs().getString("clarity_preset", "off");
+        String presetName = getResources().getStringArray(R.array.clarity_entries)[
+                Math.max(0, java.util.Arrays.asList(getResources().getStringArray(R.array.clarity_values)).indexOf(preset))];
+        if (presetName.startsWith("Custom")) presetName = "Custom";
 
-        labels.add("Settings");
-        actions.add(() -> startActivity(new Intent(this, SettingsActivity.class)));
+        MenuPanel p = new MenuPanel(this)
+                .title("CloudPlay", bx ? "Better xCloud engine" : "CloudPlay engine")
+                .add(R.drawable.ic_m_settings, "Settings",
+                        () -> startActivity(new Intent(this, SettingsActivity.class)));
         if (bx) {
-            labels.add("Better xCloud settings");
-            actions.add(() -> webView.evaluateJavascript("window.__cpOpenBx ? __cpOpenBx() : 'missing'", r -> {
-                if (r == null || r.contains("missing")) {
-                    Toast.makeText(this, "Open it from the Xbox page header, or the in-game guide menu",
-                            Toast.LENGTH_LONG).show();
-                }
-            }));
+            p.add(R.drawable.ic_m_tune, "Better xCloud settings", () ->
+                    webView.evaluateJavascript("window.__cpOpenBx ? __cpOpenBx() : 'missing'", r -> {
+                        if (r == null || r.contains("missing")) {
+                            Toast.makeText(this, "Sign in first, or open it from the in-game guide menu",
+                                    Toast.LENGTH_LONG).show();
+                        }
+                    }));
         }
-        labels.add("Remote Play (my Xbox)");
-        actions.add(() -> webView.loadUrl(remotePlayUrl()));
-        labels.add("Clarity boost…");
-        actions.add(this::showClarityMenu);
-        labels.add("Show / hide touch controls");
-        actions.add(() -> webView.evaluateJavascript("window.__cpTouch && __cpTouch.toggle()", null));
-        labels.add("Edit touch layout");
-        actions.add(() -> webView.evaluateJavascript("window.__cpTouch && __cpTouch.edit()", null));
-        labels.add("Reload");
-        actions.add(() -> webView.reload());
-        labels.add("Go back a page");
-        actions.add(() -> { if (webView.canGoBack()) webView.goBack(); });
-        labels.add("Home");
-        actions.add(() -> webView.loadUrl(startUrl()));
-        labels.add("Exit");
-        actions.add(this::finishAndRemoveTask);
-
-        menu = new AlertDialog.Builder(this)
-                .setTitle("CloudPlay")
-                .setItems(labels.toArray(new String[0]), (d, which) -> actions.get(which).run())
-                .create();
-        menu.setOnDismissListener(d -> enterImmersive());
-        menu.show();
+        p.section(R.drawable.ic_m_console, "Remote Play (my Xbox)", () -> webView.loadUrl(remotePlayUrl()))
+         .add(R.drawable.ic_m_clarity, "Clarity boost", presetName, this::showClarityMenu)
+         .add(R.drawable.ic_m_gamepad, "Show / hide touch controls",
+                 () -> webView.evaluateJavascript("window.__cpTouch && __cpTouch.toggle()", null))
+         .add(R.drawable.ic_m_edit, "Edit touch layout",
+                 () -> webView.evaluateJavascript("window.__cpTouch && __cpTouch.edit()", null))
+         .section(R.drawable.ic_m_refresh, "Reload", () -> webView.reload())
+         .add(R.drawable.ic_m_back, "Go back a page", () -> { if (webView.canGoBack()) webView.goBack(); })
+         .add(R.drawable.ic_m_home, "Home", () -> webView.loadUrl(startUrl()))
+         .section(R.drawable.ic_m_exit, "Exit CloudPlay", this::finishAndRemoveTask);
+        menu = p.show(this::enterImmersive);
     }
 
     private void showClarityMenu() {
         final String[] names = getResources().getStringArray(R.array.clarity_entries);
         final String[] values = getResources().getStringArray(R.array.clarity_values);
         String cur = prefs().getString("clarity_preset", "off");
-        int checked = java.util.Arrays.asList(values).indexOf(cur);
-        AlertDialog d = new AlertDialog.Builder(this)
-                .setTitle("Clarity boost")
-                .setSingleChoiceItems(names, checked, (dlg, which) -> {
-                    prefs().edit().putString("clarity_preset", values[which]).apply();
-                    refreshScriptWithoutReload();
-                    webView.evaluateJavascript(
-                            "window.__cpSetVideo && __cpSetVideo(" + videoConfig() + ")", null);
-                    dlg.dismiss();
-                })
-                .create();
-        d.setOnDismissListener(x -> enterImmersive());
-        d.show();
+        MenuPanel p = new MenuPanel(this).title("Clarity boost", "Applies instantly");
+        for (int i = 0; i < values.length; i++) {
+            final String v = values[i];
+            p.add(v.equals(cur) ? R.drawable.ic_m_check : R.drawable.ic_m_clarity,
+                    names[i].replace(" (sliders below)", " (set in Settings)"),
+                    v.equals(cur) ? "On" : null, () -> {
+                        prefs().edit().putString("clarity_preset", v).apply();
+                        refreshScriptWithoutReload();
+                        webView.evaluateJavascript(
+                                "window.__cpSetVideo && __cpSetVideo(" + videoConfig() + ")", null);
+                    });
+        }
+        menu = p.show(this::enterImmersive);
+    }
+
+    // --------------------------------------------------------------- splash
+
+    private View createSplash() {
+        android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+        box.setOrientation(android.widget.LinearLayout.VERTICAL);
+        box.setGravity(android.view.Gravity.CENTER);
+        box.setBackgroundColor(0xFF0E0E0E);
+        box.setClickable(true);
+
+        android.widget.ImageView logo = new android.widget.ImageView(this);
+        logo.setImageResource(R.drawable.ic_logo);
+        box.addView(logo, new android.widget.LinearLayout.LayoutParams(dp(84), dp(84)));
+
+        android.widget.TextView name = new android.widget.TextView(this);
+        name.setText("CloudPlay");
+        name.setTextColor(0xFFFFFFFF);
+        name.setTextSize(26);
+        name.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.BOLD));
+        name.setPadding(0, dp(18), 0, dp(4));
+        box.addView(name);
+
+        android.widget.TextView sub = new android.widget.TextView(this);
+        sub.setText(useBetterXcloud() ? "Xbox Cloud Gaming · Better xCloud" : "Xbox Cloud Gaming");
+        sub.setTextColor(0xFFA8A8A8);
+        sub.setTextSize(13);
+        box.addView(sub);
+
+        android.widget.ProgressBar bar = new android.widget.ProgressBar(this, null,
+                android.R.attr.progressBarStyleHorizontal);
+        bar.setIndeterminate(true);
+        bar.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(0xFF16C60C));
+        android.widget.LinearLayout.LayoutParams lp =
+                new android.widget.LinearLayout.LayoutParams(dp(180), dp(4));
+        lp.topMargin = dp(28);
+        box.addView(bar, lp);
+        return box;
+    }
+
+    private void hideSplash() {
+        if (splash == null) return;
+        final View v = splash;
+        splash = null;
+        v.animate().alpha(0f).setDuration(250).withEndAction(() -> {
+            if (v.getParent() instanceof ViewGroup) ((ViewGroup) v.getParent()).removeView(v);
+        }).start();
     }
 
     // ------------------------------------------------------------ fullscreen

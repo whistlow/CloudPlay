@@ -1,0 +1,9 @@
+<resources>
+    <color name="xbox_green">#FF107C10</color>
+    <color name="xbox_green_light">#FF16C60C</color>
+    <color name="bg">#FF0E0E0E</color>
+    <color name="surface">#FF1A1A1A</color>
+    <color name="surface_high">#FF242424</color>
+    <color name="text_primary">#FFFFFFFF</color>
+    <color name="text_secondary">#FFA8A8A8</color>
+</resources>
