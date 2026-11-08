@@ -1,0 +1,61 @@
+<resources>
+    <string-array name="resolution_entries">
+        <item>Auto (Xbox decides)</item>
+        <item>720p (lower data use)</item>
+        <item>1080p</item>
+        <item>1080p high quality</item>
+    </string-array>
+    <string-array name="resolution_values">
+        <item>auto</item>
+        <item>720p</item>
+        <item>1080p</item>
+        <item>1080p_hq</item>
+    </string-array>
+
+    <string-array name="codec_entries">
+        <item>Auto</item>
+        <item>H.264 High profile (sharpest)</item>
+        <item>H.264 Main profile</item>
+        <item>H.264 Baseline (lightest to decode)</item>
+    </string-array>
+    <string-array name="codec_values">
+        <item>auto</item>
+        <item>h264_high</item>
+        <item>h264_main</item>
+        <item>h264_baseline</item>
+    </string-array>
+
+    <string-array name="bitrate_entries">
+        <item>Unlimited</item>
+        <item>40 Mbps</item>
+        <item>30 Mbps</item>
+        <item>20 Mbps</item>
+        <item>15 Mbps</item>
+        <item>10 Mbps</item>
+        <item>8 Mbps</item>
+        <item>5 Mbps</item>
+        <item>3 Mbps</item>
+    </string-array>
+    <string-array name="bitrate_values">
+        <item>0</item>
+        <item>40000</item>
+        <item>30000</item>
+        <item>20000</item>
+        <item>15000</item>
+        <item>10000</item>
+        <item>8000</item>
+        <item>5000</item>
+        <item>3000</item>
+    </string-array>
+
+    <string-array name="fit_entries">
+        <item>Fit (black bars, no distortion)</item>
+        <item>Zoom to fill (crops edges)</item>
+        <item>Stretch to fill</item>
+    </string-array>
+    <string-array name="fit_values">
+        <item>contain</item>
+        <item>cover</item>
+        <item>fill</item>
+    </string-array>
+</resources>

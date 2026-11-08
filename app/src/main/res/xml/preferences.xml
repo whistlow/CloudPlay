@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory app:title="Stream quality" app:iconSpaceReserved="false">
+        <ListPreference
+            app:key="resolution"
+            app:title="Resolution"
+            app:entries="@array/resolution_entries"
+            app:entryValues="@array/resolution_values"
+            app:defaultValue="1080p"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+        <ListPreference
+            app:key="codec"
+            app:title="Video codec profile"
+            app:entries="@array/codec_entries"
+            app:entryValues="@array/codec_values"
+            app:defaultValue="auto"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+        <ListPreference
+            app:key="max_bitrate"
+            app:title="Max bitrate"
+            app:entries="@array/bitrate_entries"
+            app:entryValues="@array/bitrate_values"
+            app:defaultValue="0"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+        <ListPreference
+            app:key="region"
+            app:title="Server region"
+            app:defaultValue="auto"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Picture" app:iconSpaceReserved="false">
+        <ListPreference
+            app:key="video_fit"
+            app:title="Screen fit"
+            app:entries="@array/fit_entries"
+            app:entryValues="@array/fit_values"
+            app:defaultValue="contain"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+        <SeekBarPreference
+            app:key="sharpness"
+            app:title="Sharpness"
+            app:summary="0 = off. Uses a little extra GPU."
+            android:max="10"
+            app:min="0"
+            app:defaultValue="0"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+        <SeekBarPreference
+            app:key="saturation"
+            app:title="Saturation (%)"
+            android:max="200"
+            app:min="50"
+            app:seekBarIncrement="5"
+            app:defaultValue="100"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+        <SeekBarPreference
+            app:key="contrast"
+            app:title="Contrast (%)"
+            android:max="200"
+            app:min="50"
+            app:seekBarIncrement="5"
+            app:defaultValue="100"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+        <SeekBarPreference
+            app:key="brightness"
+            app:title="Brightness (%)"
+            android:max="150"
+            app:min="50"
+            app:seekBarIncrement="5"
+            app:defaultValue="100"
+            app:showSeekBarValue="true"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Performance" app:iconSpaceReserved="false">
+        <SwitchPreferenceCompat
+            app:key="max_refresh"
+            app:title="Highest refresh rate"
+            app:summary="Run the screen at its fastest mode for smoother menus and input"
+            app:defaultValue="true"
+            app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat
+            app:key="wifi_low_latency"
+            app:title="Low-latency Wi-Fi"
+            app:summary="Stops Wi-Fi power saving while the app is open (less lag and stutter)"
+            app:defaultValue="true"
+            app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat
+            app:key="sustained_perf"
+            app:title="Sustained performance mode"
+            app:summary="Steadier clocks for long sessions, if your device supports it"
+            app:defaultValue="false"
+            app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat
+            app:key="show_stats"
+            app:title="Show stream stats"
+            app:summary="Resolution, FPS, ping, bitrate, packet loss and decode time"
+            app:defaultValue="false"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="App" app:iconSpaceReserved="false">
+        <EditTextPreference
+            app:key="start_url"
+            app:title="Start page"
+            app:defaultValue="https://www.xbox.com/en-us/play"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+        <Preference
+            app:key="help"
+            app:title="Opening this menu"
+            app:summary="Press Back, or hold the View/Select button for 1 second"
+            app:selectable="false"
+            app:iconSpaceReserved="false" />
+        <Preference
+            app:key="reset"
+            app:title="Reset settings to defaults"
+            app:iconSpaceReserved="false" />
+        <Preference
+            app:key="clear_data"
+            app:title="Sign out and clear data"
+            app:summary="Removes cookies, cache and saved logins"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+</PreferenceScreen>
