@@ -46,6 +46,15 @@
         localStorage.setItem('cp.stockUi.v1', '1');
       }
     } catch (e) {}
+    // Faster artwork: game tiles and backgrounds download as smaller images.
+    try {
+      var bxs = JSON.parse(localStorage.getItem('BetterXcloud') || '{}');
+      var q = C.fastArt === false ? 90 : 70;
+      if (bxs['ui.imageQuality'] !== q) {
+        bxs['ui.imageQuality'] = q;
+        localStorage.setItem('BetterXcloud', JSON.stringify(bxs));
+      }
+    } catch (e) {}
     // Its own header buttons are replaced by the settings gear next to Search.
     onReady(function () {
       var st = document.createElement('style');
@@ -78,6 +87,23 @@
       Object.defineProperty(navigator, 'userAgentData', { configurable: true, get: function () { return fake; } });
     }
   } catch (e) {}
+  // Open connections to the image and game servers right away instead of on first use.
+  (function preconnect() {
+    var hosts = ['https://store-images.s-microsoft.com', 'https://assets.xboxservices.com',
+      'https://catalog.gamepass.com', 'https://xgpuweb.gssv-play-prod.xboxlive.com',
+      'https://xgpuwebf2p.gssv-play-prod.xboxlive.com', 'https://emerald.xboxservices.com'];
+    function add() {
+      var head = document.head || document.documentElement;
+      if (!head) return;
+      hosts.forEach(function (h) {
+        var l = document.createElement('link');
+        l.rel = 'preconnect'; l.href = h; l.crossOrigin = 'anonymous';
+        head.appendChild(l);
+      });
+    }
+    if (document.documentElement) add(); else document.addEventListener('readystatechange', add, { once: true });
+  })();
+
   function onReady(fn) {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
     else fn();
