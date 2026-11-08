@@ -42,7 +42,7 @@ class MenuPanel {
 
     private final Activity act;
     private final List<Item> items = new ArrayList<>();
-    private String title = "CloudPlay";
+    private String title = "Xbox";
     private String subtitle;
 
     MenuPanel(Activity act) {
@@ -93,7 +93,7 @@ class MenuPanel {
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(dp(8), 0, dp(8), dp(14));
         ImageView logo = new ImageView(act);
-        logo.setImageResource(R.drawable.ic_logo);
+        logo.setImageResource(R.drawable.xbox_logo);
         header.addView(logo, new LinearLayout.LayoutParams(dp(36), dp(36)));
         LinearLayout titles = new LinearLayout(act);
         titles.setOrientation(LinearLayout.VERTICAL);

@@ -1,4 +1,4 @@
-# CloudPlay
+# Xbox (CloudPlay)
 
 A minimal Android app that opens https://www.xbox.com/en-us/play full-screen in landscape.
 
@@ -26,3 +26,8 @@ Every push to `main` builds a debug APK. Open the **Actions** tab, pick the late
 `app-debug.apk`). You can also start a build manually with **Run workflow**.
 
 Install it on your phone after allowing installs from unknown sources.
+
+## Notes
+- The app shows as **Xbox** on the device. Settings open from the gear next to Search in the Xbox page header.
+- The bundled enhancement script has its visible name changed to "Advanced" (MIT allows modification; license kept in `assets/better-xcloud/LICENSE`, shown under Settings → Open-source licenses).
+- Personal use only: the Xbox name and logo belong to Microsoft, so don't publish this build to an app store.

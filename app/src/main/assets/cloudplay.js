@@ -327,7 +327,7 @@
 
   // ========================================================= touch controls
   var touchOn = C.touchMode === 'always' || (C.touchMode === 'auto' && !BX);
-  var VPAD_ID = 'CloudPlay Touch Controller (STANDARD GAMEPAD Vendor: 045e Product: 02ea)';
+  var VPAD_ID = 'Touch Controller (STANDARD GAMEPAD Vendor: 045e Product: 02ea)';
   var vpad = {
     id: VPAD_ID, index: 0, connected: true, mapping: 'standard', timestamp: 0,
     axes: [0, 0, 0, 0], buttons: [], vibrationActuator: actuator, hapticActuators: []
@@ -428,6 +428,9 @@
           list[i] = gp;
         });
       }
+      if (menuOpen) {
+        return list.map(function (gp) { return gp ? neutral(gp) : null; });
+      }
       if (vpadActive) {
         var slot = list.indexOf(null);
         if (slot < 0) slot = list.length;
@@ -437,6 +440,23 @@
       return list;
     }
   });
+
+  var menuOpen = false, neutralCache = {};
+  function neutral(gp) {
+    var n = neutralCache[gp.index];
+    if (!n) {
+      n = neutralCache[gp.index] = { id: gp.id, index: gp.index, connected: true, mapping: 'standard',
+        timestamp: performance.now(), axes: [0, 0, 0, 0], buttons: [], vibrationActuator: actuator, hapticActuators: [] };
+      for (var k = 0; k < 17; k++) n.buttons.push({ pressed: false, touched: false, value: 0 });
+    }
+    return n;
+  }
+  // Raw controller state for the settings panel (bypasses the neutral copies above).
+  function rawPads() {
+    var bp = bridgePads(), keys = Object.keys(bp);
+    if (keys.length) return keys.map(function (k) { return bp[k]; });
+    return realPads().filter(function (p) { return p; });
+  }
 
   function announce(type, pad) {
     try {
@@ -460,7 +480,7 @@
     }
   }, 700);
 
-  // Put a "CloudPlay app settings" button at the top of Better xCloud's settings,
+  // Put an "App settings" button at the top of Better xCloud's settings,
   // in place of its "install the Android app" link.
   if (BX) onReady(function () {
     new MutationObserver(function () {
@@ -472,7 +492,7 @@
       b.className = 'bx-button bx-full-width bx-focusable cp-app-settings';
       b.tabIndex = 0;
       var span = document.createElement('span');
-      span.textContent = '\u2699\uFE0F  CloudPlay app settings';
+      span.textContent = '\u2699\uFE0F  App settings';
       b.appendChild(span);
       b.addEventListener('click', function (e) {
         e.preventDefault(); e.stopPropagation();
@@ -481,6 +501,268 @@
       top.insertBefore(b, top.firstChild);
     }).observe(document.documentElement, { childList: true, subtree: true });
   });
+
+  // ================================================================ settings
+  // A gear in the Xbox header (cloned from the site's own Search button so it matches),
+  // opening a panel styled like the site's Settings screen.
+  var GEAR_PATH = 'M19.14,12.94c0.04,-0.3 0.06,-0.61 0.06,-0.94c0,-0.32 -0.02,-0.64 -0.07,-0.94l2.03,-1.58c0.18,-0.14 0.23,-0.41 0.12,-0.61l-1.92,-3.32c-0.12,-0.22 -0.37,-0.29 -0.59,-0.22l-2.39,0.96c-0.5,-0.38 -1.03,-0.7 -1.62,-0.94L14.4,2.81c-0.04,-0.24 -0.24,-0.41 -0.48,-0.41h-3.84c-0.24,0 -0.43,0.17 -0.47,0.41L9.25,5.35C8.66,5.59 8.12,5.92 7.63,6.29L5.24,5.33c-0.22,-0.08 -0.47,0 -0.59,0.22L2.74,8.87C2.62,9.08 2.66,9.34 2.86,9.48l2.03,1.58C4.84,11.36 4.8,11.69 4.8,12s0.02,0.64 0.07,0.94l-2.03,1.58c-0.18,0.14 -0.23,0.41 -0.12,0.61l1.92,3.32c0.12,0.22 0.37,0.29 0.59,0.22l2.39,-0.96c0.5,0.38 1.03,0.7 1.62,0.94l0.36,2.54c0.05,0.24 0.24,0.41 0.48,0.41h3.84c0.24,0 0.44,-0.17 0.47,-0.41l0.36,-2.54c0.59,-0.24 1.13,-0.56 1.62,-0.94l2.39,0.96c0.22,0.08 0.47,0 0.59,-0.22l1.92,-3.32c0.12,-0.22 0.07,-0.47 -0.12,-0.61L19.14,12.94zM12,15.6c-1.98,0 -3.6,-1.62 -3.6,-3.6s1.62,-3.6 3.6,-3.6s3.6,1.62 3.6,3.6S13.98,15.6 12,15.6z';
+  var SVGNS = 'http://www.w3.org/2000/svg';
+
+  function gearSvg(like) {
+    var svg = document.createElementNS(SVGNS, 'svg');
+    if (like) {
+      ['class', 'width', 'height', 'style', 'aria-hidden'].forEach(function (a) {
+        var v = like.getAttribute(a); if (v != null) svg.setAttribute(a, v);
+      });
+    } else {
+      svg.setAttribute('width', '24'); svg.setAttribute('height', '24');
+    }
+    svg.setAttribute('viewBox', '0 0 24 24');
+    var path = document.createElementNS(SVGNS, 'path');
+    path.setAttribute('d', GEAR_PATH);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.5');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(path);
+    return svg;
+  }
+
+  function findSearchButton() {
+    var cands = document.querySelectorAll('a[href*="/search"], button[aria-label*="earch"], a[aria-label*="earch"]');
+    for (var i = 0; i < cands.length; i++) {
+      var r = cands[i].getBoundingClientRect();
+      if (r.width > 0 && r.top < 160 && !cands[i].closest('.cpm-backdrop')) return cands[i];
+    }
+    return null;
+  }
+
+  var headerReported = null;
+  function ensureHeaderGear() {
+    var existing = document.querySelector('.cp-header-gear');
+    var search = findSearchButton();
+    if (!existing && search) {
+      var btn = search.cloneNode(true);
+      btn.classList.add('cp-header-gear');
+      btn.removeAttribute('href');
+      btn.removeAttribute('id');
+      btn.setAttribute('role', 'button');
+      btn.setAttribute('tabindex', '0');
+      btn.setAttribute('aria-label', 'Settings');
+      btn.setAttribute('title', 'Settings');
+      var oldSvg = btn.querySelector('svg');
+      if (oldSvg) oldSvg.parentNode.replaceChild(gearSvg(oldSvg), oldSvg);
+      else btn.appendChild(gearSvg(null));
+      btn.querySelectorAll('span').forEach(function (sp) { if (!sp.querySelector('svg')) sp.textContent = ''; });
+      btn.addEventListener('click', function (e) {
+        e.preventDefault(); e.stopPropagation(); window.__cpMenu.open();
+      }, true);
+      search.parentNode.insertBefore(btn, search);
+      existing = btn;
+    }
+    var present = !!(existing && existing.isConnected && existing.getBoundingClientRect().width > 0);
+    if (present !== headerReported) {
+      headerReported = present;
+      try { native() && native().setHeaderButton(present); } catch (e) {}
+    }
+  }
+  onReady(function () { setInterval(ensureHeaderGear, 800); ensureHeaderGear(); });
+
+  var CHEVRON = '<svg width="16" height="16" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var CHECK = '<svg width="18" height="18" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var CLARITY = [['off', 'Off'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['vivid', 'Vivid'], ['custom', 'Custom']];
+
+  function remotePlayUrl() {
+    var m = location.pathname.match(/^\/([a-z]{2}-[a-z]{2})\//i);
+    return 'https://www.xbox.com/' + (m ? m[1] : 'en-US') + '/play/consoles';
+  }
+
+  var menuEl = null, rows = [], focusIdx = 0, page = 'main', padTimer = null;
+
+  function mainItems() {
+    var preset = (CLARITY.filter(function (c) { return c[0] === (C.clarityPreset || 'off'); })[0] || CLARITY[0])[1];
+    var items = [
+      { label: 'App settings', sub: 'Stream quality, controls, rumble, performance', go: function () { close(); native() && native().openSettings(); } }
+    ];
+    if (BX) items.push({ label: 'Advanced settings', sub: 'Upscaling, stats, server, mouse & keyboard', go: function () {
+      close(); setTimeout(function () { if (window.__cpOpenBx && __cpOpenBx() !== 'ok') toast('Sign in to use advanced settings'); }, 60);
+    } });
+    items.push(
+      { label: 'Remote Play', sub: 'Play games installed on your Xbox console', go: function () { close(); location.href = remotePlayUrl(); } },
+      { label: 'Clarity boost', detail: preset, go: function () { render('clarity'); } },
+      { label: 'Touch controls', sub: 'Show or hide on-screen buttons', go: function () { close(); window.__cpTouch && __cpTouch.toggle(); } },
+      { label: 'Edit touch layout', go: function () { close(); window.__cpTouch && __cpTouch.edit(); } },
+      { label: 'Reload', go: function () { location.reload(); } },
+      { label: 'Exit', go: function () { native() && native().exitApp(); } }
+    );
+    return items;
+  }
+
+  function clarityItems() {
+    return CLARITY.map(function (c) {
+      return { label: c[1], check: (C.clarityPreset || 'off') === c[0], go: function () {
+        C.clarityPreset = c[0];
+        try { native() && native().setClarity(c[0]); } catch (e) {}
+        render('clarity', focusIdx);
+      } };
+    });
+  }
+
+  function injectMenuStyle() {
+    if (document.getElementById('cpm-style')) return;
+    var st = document.createElement('style');
+    st.id = 'cpm-style';
+    st.textContent =
+      '.cpm-backdrop{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;' +
+      'background:rgba(0,0,0,.35);font-family:inherit;-webkit-font-smoothing:antialiased;animation:cpmFade .15s ease-out}' +
+      '.cpm{width:min(92vw,1180px);height:min(88vh,680px);box-sizing:border-box;padding:3.2vh 3.4vw;color:#fff;' +
+      'background:rgba(52,55,82,.78);-webkit-backdrop-filter:blur(28px) saturate(150%);backdrop-filter:blur(28px) saturate(150%);' +
+      'border-radius:6px;box-shadow:0 24px 80px rgba(0,0,0,.45);display:flex;flex-direction:column;animation:cpmPop .18s ease-out}' +
+      '.cpm-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:2.6vh}' +
+      '.cpm-title{font-size:22px;font-weight:600;letter-spacing:.2px;display:flex;align-items:center;gap:14px}' +
+      '.cpm-back,.cpm-close{background:none;border:0;color:#fff;padding:8px;border-radius:50%;cursor:pointer;display:flex}' +
+      '.cpm-back:hover,.cpm-close:hover{background:rgba(255,255,255,.12)}' +
+      '.cpm-list{overflow-y:auto;display:flex;flex-direction:column;gap:4px;padding:2px;scrollbar-width:none}' +
+      '.cpm-row{display:flex;align-items:center;gap:16px;min-height:48px;padding:8px 18px;border-radius:6px;cursor:pointer;' +
+      'font-size:16px;font-weight:500;transition:background .12s}' +
+      '.cpm-row .cpm-txt{display:flex;flex-direction:column;gap:2px}' +
+      '.cpm-row .cpm-sub{font-size:12.5px;font-weight:400;color:rgba(255,255,255,.68)}' +
+      '.cpm-row .cpm-detail{margin-left:auto;font-size:14px;font-weight:400;color:rgba(255,255,255,.75)}' +
+      '.cpm-row .cpm-end{margin-left:auto;display:flex;align-items:center;opacity:.9}' +
+      '.cpm-row .cpm-detail + .cpm-end{margin-left:10px}' +
+      '.cpm-row.cpm-focus,.cpm-row:hover{background:rgba(196,200,255,.30)}' +
+      '.cpm-row.cpm-focus{box-shadow:0 0 0 2px rgba(255,255,255,.85) inset}' +
+      '.cpm-hint{margin-top:auto;padding-top:2vh;font-size:12.5px;color:rgba(255,255,255,.55)}' +
+      '.cp-toast{position:fixed;left:50%;bottom:8vh;transform:translateX(-50%);z-index:2147483647;background:rgba(30,30,30,.92);' +
+      'color:#fff;padding:10px 18px;border-radius:6px;font:14px system-ui,sans-serif}' +
+      '@keyframes cpmFade{from{opacity:0}to{opacity:1}}@keyframes cpmPop{from{transform:scale(.98);opacity:.6}to{transform:none;opacity:1}}';
+    document.head.appendChild(st);
+  }
+
+  function toast(msg) {
+    var t = document.createElement('div');
+    t.className = 'cp-toast'; t.textContent = msg;
+    document.documentElement.appendChild(t);
+    setTimeout(function () { t.remove(); }, 2600);
+  }
+
+  function setFocus(i) {
+    if (!rows.length) return;
+    focusIdx = (i + rows.length) % rows.length;
+    rows.forEach(function (r, k) { r.classList.toggle('cpm-focus', k === focusIdx); });
+    rows[focusIdx].scrollIntoView({ block: 'nearest' });
+  }
+
+  function render(which, keepFocus) {
+    page = which;
+    var box = menuEl.querySelector('.cpm');
+    box.innerHTML = '';
+    var head = document.createElement('div'); head.className = 'cpm-head';
+    var title = document.createElement('div'); title.className = 'cpm-title';
+    if (which !== 'main') {
+      var back = document.createElement('button'); back.className = 'cpm-back'; back.setAttribute('aria-label', 'Back');
+      back.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      back.onclick = function () { render('main'); };
+      title.appendChild(back);
+    }
+    title.appendChild(document.createTextNode(which === 'main' ? 'Settings' : 'Clarity boost'));
+    var x = document.createElement('button'); x.className = 'cpm-close'; x.setAttribute('aria-label', 'Close');
+    x.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
+    x.onclick = close;
+    head.appendChild(title); head.appendChild(x); box.appendChild(head);
+
+    var list = document.createElement('div'); list.className = 'cpm-list';
+    var items = which === 'main' ? mainItems() : clarityItems();
+    rows = items.map(function (it, k) {
+      var r = document.createElement('div'); r.className = 'cpm-row';
+      var txt = document.createElement('div'); txt.className = 'cpm-txt';
+      var l = document.createElement('div'); l.textContent = it.label; txt.appendChild(l);
+      if (it.sub) { var sb = document.createElement('div'); sb.className = 'cpm-sub'; sb.textContent = it.sub; txt.appendChild(sb); }
+      r.appendChild(txt);
+      if (it.detail) { var d = document.createElement('div'); d.className = 'cpm-detail'; d.textContent = it.detail; r.appendChild(d); }
+      var end = document.createElement('div'); end.className = 'cpm-end';
+      end.innerHTML = it.check ? CHECK : (it.check === false ? '' : CHEVRON);
+      r.appendChild(end);
+      r.addEventListener('click', function (e) { e.stopPropagation(); it.go(); });
+      r.addEventListener('mouseenter', function () { setFocus(k); });
+      if (it.check) r._checked = true;
+      r._go = it.go;
+      list.appendChild(r);
+      return r;
+    });
+    box.appendChild(list);
+    var hint = document.createElement('div'); hint.className = 'cpm-hint';
+    hint.textContent = which === 'main' ? '\u24B6 Select    \u24B7 Close' : '\u24B6 Select    \u24B7 Back';
+    box.appendChild(hint);
+    var checked = rows.findIndex(function (r) { return r._checked; });
+    setFocus(keepFocus != null ? keepFocus : Math.max(0, checked));
+  }
+
+  function goBackOrClose() { if (page !== 'main') render('main'); else close(); }
+
+  // Controller navigation for the panel (D-pad / left stick, A, B), with key repeat.
+  function startPadNav() {
+    var prev = {}, holdDir = 0, nextRepeat = 0;
+    padTimer = setInterval(function () {
+      var pads = rawPads(), b = {}, dir = 0;
+      pads.forEach(function (p) {
+        if (!p || !p.buttons) return;
+        [0, 1, 12, 13].forEach(function (i) { if (p.buttons[i] && p.buttons[i].pressed) b[i] = true; });
+        var ay = p.axes && p.axes[1] || 0;
+        if (ay < -0.6) b[12] = true; if (ay > 0.6) b[13] = true;
+      });
+      if (b[12]) dir = -1; else if (b[13]) dir = 1;
+      var now = performance.now();
+      if (dir && (dir !== holdDir || now >= nextRepeat)) {
+        nextRepeat = now + (dir !== holdDir ? 380 : 110);
+        setFocus(focusIdx + dir);
+      }
+      holdDir = dir;
+      if (b[0] && !prev[0] && rows[focusIdx]) rows[focusIdx]._go();
+      if (b[1] && !prev[1]) goBackOrClose();
+      prev = b;
+    }, 16);
+  }
+
+  function onKey(e) {
+    if (!menuEl) return;
+    var k = e.key;
+    if (k === 'ArrowDown') setFocus(focusIdx + 1);
+    else if (k === 'ArrowUp') setFocus(focusIdx - 1);
+    else if (k === 'Enter' || k === ' ') { if (rows[focusIdx]) rows[focusIdx]._go(); }
+    else if (k === 'Escape' || k === 'Backspace') goBackOrClose();
+    else return;
+    e.preventDefault(); e.stopPropagation();
+  }
+
+  function open() {
+    if (menuEl) return;
+    injectMenuStyle();
+    menuOpen = true;
+    menuEl = document.createElement('div'); menuEl.className = 'cpm-backdrop';
+    var font = document.body ? getComputedStyle(document.body).fontFamily : '';
+    menuEl.style.fontFamily = (font && !/^(serif|"?Times)/i.test(font) ? font + ',' : '') +
+      '"Segoe UI","Segoe UI Variable",Roboto,system-ui,sans-serif';
+    var box = document.createElement('div'); box.className = 'cpm';
+    box.addEventListener('click', function (e) { e.stopPropagation(); });
+    menuEl.appendChild(box);
+    menuEl.addEventListener('click', close);
+    document.documentElement.appendChild(menuEl);
+    window.addEventListener('keydown', onKey, true);
+    render('main');
+    // Ignore the button press that opened the panel.
+    setTimeout(startPadNav, 250);
+  }
+
+  function close() {
+    if (!menuEl) return;
+    clearInterval(padTimer); padTimer = null;
+    window.removeEventListener('keydown', onKey, true);
+    menuEl.remove(); menuEl = null; rows = [];
+    setTimeout(function () { menuOpen = false; }, 200); // let the B press finish first
+  }
+
+  window.__cpMenu = { open: open, close: close, toggle: function () { menuEl ? close() : open(); } };
 
   // ================================================================ latency
   // Ask WebRTC for the smallest playout buffer: lower input-to-photon delay.

@@ -73,7 +73,7 @@ public class MainActivity extends AppCompatActivity {
     private String appliedUrl;
     private WifiManager.WifiLock wifiLock;
     private android.app.Dialog menu;
-    private View splash;
+    private volatile boolean headerButton;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable showMenuRunnable = this::showMenu;
 
@@ -149,10 +149,6 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         webView.setWebChromeClient(new WebChromeClient() {
-            @Override
-            public void onProgressChanged(WebView view, int progress) {
-                if (progress >= 85) hideSplash();
-            }
 
             @Override
             public void onPermissionRequest(PermissionRequest request) {
@@ -165,12 +161,6 @@ public class MainActivity extends AppCompatActivity {
         root.addView(webView, new android.widget.FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         root.addView(createGear());
-        if (state == null) {
-            splash = createSplash();
-            root.addView(splash, new android.widget.FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            handler.postDelayed(this::hideSplash, 12000); // never block for long
-        }
         setContentView(root);
         updateGear();
         webView.requestFocus();
@@ -231,7 +221,7 @@ public class MainActivity extends AppCompatActivity {
         bg.setStroke(dp(1), 0x40FFFFFF);
         gear.setBackground(bg);
         gear.setFocusable(false);           // keep controller focus on the game
-        gear.setContentDescription("CloudPlay settings");
+        gear.setContentDescription("Settings");
         gear.setElevation(dp(6));
         gear.setOnClickListener(v -> showMenu());
         gear.setOnLongClickListener(v -> {
@@ -246,7 +236,7 @@ public class MainActivity extends AppCompatActivity {
         if (gear == null) return;
         SharedPreferences p = prefs();
         String mode = p.getString("settings_button", "auto");
-        boolean show = "always".equals(mode) || ("auto".equals(mode) && !streaming);
+        boolean show = "always".equals(mode) || ("auto".equals(mode) && !streaming && !headerButton);
         gear.setVisibility(show ? View.VISIBLE : View.GONE);
 
         String pos = p.getString("settings_button_pos", "bottom_right");
@@ -319,6 +309,8 @@ public class MainActivity extends AppCompatActivity {
             o.put("touchLayout", p.getString("touch_layout", ""));
             o.put("controllerInput", p.getString("controller_input", "auto"));
             o.put("lowLatency", p.getBoolean("low_latency", true));
+            o.put("clarityPreset", p.getString("clarity_preset", "off"));
+            o.put("startUrl", startUrl());
         } catch (JSONException ignored) {
         }
         return o.toString();
@@ -425,6 +417,32 @@ public class MainActivity extends AppCompatActivity {
         @JavascriptInterface
         public void openSettings() {
             runOnUiThread(() -> startActivity(new Intent(MainActivity.this, SettingsActivity.class)));
+        }
+
+        @JavascriptInterface
+        public void setHeaderButton(boolean present) {
+            headerButton = present;
+            runOnUiThread(MainActivity.this::updateGear);
+        }
+
+        @JavascriptInterface
+        public void setClarity(String preset) {
+            runOnUiThread(() -> {
+                prefs().edit().putString("clarity_preset", preset).apply();
+                refreshScriptWithoutReload();
+                if (webView != null) webView.evaluateJavascript(
+                        "window.__cpSetVideo && __cpSetVideo(" + videoConfig() + ")", null);
+            });
+        }
+
+        @JavascriptInterface
+        public void exitApp() {
+            runOnUiThread(MainActivity.this::finishAndRemoveTask);
+        }
+
+        @JavascriptInterface
+        public void nativeMenu() {
+            runOnUiThread(MainActivity.this::showNativeMenu);
         }
 
         @JavascriptInterface
@@ -620,6 +638,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showMenu() {
+        if (isFinishing() || webView == null) return;
+        webView.evaluateJavascript("window.__cpMenu ? (__cpMenu.toggle(), 'ok') : 'missing'", r -> {
+            if (r == null || r.contains("missing")) showNativeMenu();
+        });
+    }
+
+    private void showNativeMenu() {
         if (isFinishing() || (menu != null && menu.isShowing())) return;
         final boolean bx = useBetterXcloud();
         String preset = prefs().getString("clarity_preset", "off");
@@ -628,11 +653,11 @@ public class MainActivity extends AppCompatActivity {
         if (presetName.startsWith("Custom")) presetName = "Custom";
 
         MenuPanel p = new MenuPanel(this)
-                .title("CloudPlay", bx ? "Better xCloud engine" : "CloudPlay engine")
+                .title("Xbox", bx ? "Advanced engine" : "Basic engine")
                 .add(R.drawable.ic_m_settings, "Settings",
                         () -> startActivity(new Intent(this, SettingsActivity.class)));
         if (bx) {
-            p.add(R.drawable.ic_m_tune, "Better xCloud settings", () ->
+            p.add(R.drawable.ic_m_tune, "Advanced settings", () ->
                     webView.evaluateJavascript("window.__cpOpenBx ? __cpOpenBx() : 'missing'", r -> {
                         if (r == null || r.contains("missing")) {
                             Toast.makeText(this, "Sign in first, or open it from the in-game guide menu",
@@ -649,7 +674,7 @@ public class MainActivity extends AppCompatActivity {
          .section(R.drawable.ic_m_refresh, "Reload", () -> webView.reload())
          .add(R.drawable.ic_m_back, "Go back a page", () -> { if (webView.canGoBack()) webView.goBack(); })
          .add(R.drawable.ic_m_home, "Home", () -> webView.loadUrl(startUrl()))
-         .section(R.drawable.ic_m_exit, "Exit CloudPlay", this::finishAndRemoveTask);
+         .section(R.drawable.ic_m_exit, "Exit", this::finishAndRemoveTask);
         menu = p.show(this::enterImmersive);
     }
 
@@ -670,53 +695,6 @@ public class MainActivity extends AppCompatActivity {
                     });
         }
         menu = p.show(this::enterImmersive);
-    }
-
-    // --------------------------------------------------------------- splash
-
-    private View createSplash() {
-        android.widget.LinearLayout box = new android.widget.LinearLayout(this);
-        box.setOrientation(android.widget.LinearLayout.VERTICAL);
-        box.setGravity(android.view.Gravity.CENTER);
-        box.setBackgroundColor(0xFF0E0E0E);
-        box.setClickable(true);
-
-        android.widget.ImageView logo = new android.widget.ImageView(this);
-        logo.setImageResource(R.drawable.ic_logo);
-        box.addView(logo, new android.widget.LinearLayout.LayoutParams(dp(84), dp(84)));
-
-        android.widget.TextView name = new android.widget.TextView(this);
-        name.setText("CloudPlay");
-        name.setTextColor(0xFFFFFFFF);
-        name.setTextSize(26);
-        name.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.BOLD));
-        name.setPadding(0, dp(18), 0, dp(4));
-        box.addView(name);
-
-        android.widget.TextView sub = new android.widget.TextView(this);
-        sub.setText(useBetterXcloud() ? "Xbox Cloud Gaming · Better xCloud" : "Xbox Cloud Gaming");
-        sub.setTextColor(0xFFA8A8A8);
-        sub.setTextSize(13);
-        box.addView(sub);
-
-        android.widget.ProgressBar bar = new android.widget.ProgressBar(this, null,
-                android.R.attr.progressBarStyleHorizontal);
-        bar.setIndeterminate(true);
-        bar.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(0xFF16C60C));
-        android.widget.LinearLayout.LayoutParams lp =
-                new android.widget.LinearLayout.LayoutParams(dp(180), dp(4));
-        lp.topMargin = dp(28);
-        box.addView(bar, lp);
-        return box;
-    }
-
-    private void hideSplash() {
-        if (splash == null) return;
-        final View v = splash;
-        splash = null;
-        v.animate().alpha(0f).setDuration(250).withEndAction(() -> {
-            if (v.getParent() instanceof ViewGroup) ((ViewGroup) v.getParent()).removeView(v);
-        }).start();
     }
 
     // ------------------------------------------------------------ fullscreen

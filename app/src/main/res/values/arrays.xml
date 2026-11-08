@@ -60,8 +60,8 @@
     </string-array>
 
     <string-array name="engine_entries">
-        <item>Better xCloud (full feature set, in-page settings)</item>
-        <item>CloudPlay only (settings below)</item>
+        <item>Advanced (full feature set, in-page settings)</item>
+        <item>Basic (settings below)</item>
     </string-array>
     <string-array name="engine_values">
         <item>betterxcloud</item>

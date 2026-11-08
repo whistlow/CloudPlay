@@ -5,7 +5,7 @@
     <PreferenceCategory app:title="Quick access" app:iconSpaceReserved="false">
         <ListPreference
             app:key="settings_button"
-            app:title="Floating settings button"
+            app:title="Floating settings button (when the Xbox header is hidden)"
             app:entries="@array/gear_entries"
             app:entryValues="@array/gear_values"
             app:defaultValue="auto"
@@ -22,7 +22,7 @@
         <Preference
             app:key="help"
             app:title="Other ways in"
-            app:summary="Tap the gear for the menu, or long-press it for settings. Hold View/Select for 1 second, or press Back. In Better xCloud's settings, tap CloudPlay app settings."
+            app:summary="Tap the gear next to Search at the top of the Xbox page. You can also hold View/Select for 1 second, or press Back."
             app:selectable="false"
             app:iconSpaceReserved="false" />
     </PreferenceCategory>
@@ -38,13 +38,13 @@
             app:iconSpaceReserved="false" />
         <Preference
             app:key="bx_info"
-            app:title="Better xCloud settings"
-            app:summary="Resolution, codec, bitrate, server, upscaling (AMD FSR/CAS), stats, mouse and keyboard and more. Open them from the CloudPlay menu, or the Better xCloud button at the top of the Xbox page."
+            app:title="Advanced settings"
+            app:summary="Resolution, codec, bitrate, server, upscaling (AMD FSR/CAS), stats, mouse and keyboard and more. Open them from the settings button at the top of the Xbox page."
             app:selectable="false"
             app:iconSpaceReserved="false" />
     </PreferenceCategory>
 
-    <PreferenceCategory app:key="cat_stream" app:title="Stream quality (CloudPlay engine)" app:iconSpaceReserved="false">
+    <PreferenceCategory app:key="cat_stream" app:title="Stream quality (Basic engine)" app:iconSpaceReserved="false">
         <ListPreference
             app:key="resolution"
             app:title="Resolution"
@@ -172,7 +172,7 @@
             app:iconSpaceReserved="false" />
         <ListPreference
             app:key="touch_mode"
-            app:title="CloudPlay touch controls"
+            app:title="On-screen touch controls"
             app:entries="@array/touch_entries"
             app:entryValues="@array/touch_values"
             app:defaultValue="auto"
@@ -199,7 +199,7 @@
         <Preference
             app:key="touch_reset"
             app:title="Reset touch layout"
-            app:summary="To move or resize buttons, use Edit touch layout in the CloudPlay menu during a game"
+            app:summary="To move or resize buttons, use Edit touch layout in the menu during a game"
             app:iconSpaceReserved="false" />
     </PreferenceCategory>
 
@@ -244,13 +244,11 @@
         <Preference
             app:key="clear_data"
             app:title="Sign out and clear data"
-            app:summary="Removes cookies, cache, saved logins and Better xCloud settings"
+            app:summary="Removes cookies, cache, saved logins and advanced settings"
             app:iconSpaceReserved="false" />
         <Preference
-            app:key="about_bx"
-            app:title="Credits"
-            app:summary="Includes Better xCloud 6.7.13 by redphx (MIT License), github.com/redphx/better-xcloud"
-            app:selectable="false"
+            app:key="licenses"
+            app:title="Open-source licenses"
             app:iconSpaceReserved="false" />
     </PreferenceCategory>
 </PreferenceScreen>

@@ -148,6 +148,26 @@ public class SettingsActivity extends AppCompatActivity {
                 return true;
             });
 
+            Preference licenses = findPreference("licenses");
+            if (licenses != null) licenses.setOnPreferenceClickListener(p -> {
+                String text;
+                try (java.io.InputStream in = requireContext().getAssets().open("better-xcloud/LICENSE")) {
+                    java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                    byte[] buf = new byte[4096];
+                    int n;
+                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                    text = out.toString("UTF-8");
+                } catch (java.io.IOException e) {
+                    text = "MIT License";
+                }
+                new AlertDialog.Builder(requireContext())
+                        .setTitle("Open-source licenses")
+                        .setMessage(text)
+                        .setPositiveButton("OK", null)
+                        .show();
+                return true;
+            });
+
             Preference touchReset = findPreference("touch_reset");
             if (touchReset != null) touchReset.setOnPreferenceClickListener(p -> {
                 PreferenceManager.getDefaultSharedPreferences(requireContext())
