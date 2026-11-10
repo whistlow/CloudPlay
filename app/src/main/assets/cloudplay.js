@@ -115,10 +115,41 @@
     } catch (e) {}
   }
   var bgMuted = [], bgAway = false;
+  // After a settings restart: keep the last frame up, dimmed, until the stream plays again.
+  (function () {
+    var r = null;
+    try { r = JSON.parse(sessionStorage.getItem('cp.resume') || 'null'); sessionStorage.removeItem('cp.resume'); } catch (e) {}
+    if (!r || Date.now() - r.t > 20000) return;
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:2147483646;background:#000 center/contain no-repeat;' +
+      'display:flex;align-items:flex-end;justify-content:center;pointer-events:none;transition:opacity .3s';
+    if (r.img) ov.style.backgroundImage = 'url(' + r.img + ')';
+    var tag = document.createElement('div');
+    tag.textContent = 'Applying your settings\u2026';
+    tag.style.cssText = 'margin-bottom:6vh;padding:10px 18px;border-radius:14px;color:#fff;font:600 15px system-ui,sans-serif;' +
+      'background:rgba(52,55,82,.72);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border:1px solid rgba(196,200,255,.35)';
+    ov.appendChild(tag);
+    var start = Date.now();
+    (function attach() {
+      if (!document.documentElement) return setTimeout(attach, 30);
+      document.documentElement.appendChild(ov);
+      var iv = setInterval(function () {
+        var vs = document.querySelectorAll('video');
+        var playing = Array.prototype.some.call(vs, function (v) { return v.videoWidth > 0 && !v.paused && v.currentTime > 0.3; });
+        if (playing || Date.now() - start > 20000) {
+          clearInterval(iv); ov.style.opacity = '0'; setTimeout(function () { ov.remove(); }, 350);
+        }
+      }, 200);
+    })();
+  })();
+
   // Settings changed in App settings arrive here and apply in place, without reloading.
   window.__cpApplyCfg = function (o) {
     try {
+      var STREAM_KEYS = ['resolution', 'codec', 'maxBitrate', 'region', 'latencyMode', 'rpResolution', 'remotePlayMode'];
+      var restart = STREAM_KEYS.some(function (k) { return o && k in o && String(o[k]) !== String(C[k]); });
       Object.keys(o || {}).forEach(function (k) { C[k] = o[k]; });
+      if (restart && window.__cpReconnect) window.__cpReconnect();
       if (typeof applyVideoStyle === 'function') applyVideoStyle();
       if (typeof applyVolume === 'function') applyVolume();
     } catch (e) {}
@@ -1262,9 +1293,31 @@
   // mid-game, the stream reconnects as soon as the panel closes, so they apply right away.
   var pendingReconnect = false;
   function nextText() {
-    return 'Set when a stream starts, so it\u2019s used next time (no reload)';
+    return lastStreaming ? 'Applies right away (the stream restarts with it)' : 'Applies when the next game starts';
   }
-  function needReconnect() { if (lastStreaming) pendingReconnect = true; }
+  // Stream settings are fixed by the server when a stream starts, so a change mid-game
+  // restarts the stream straight away (a moment after the last change, so you can step
+  // through values). The last frame stays on screen until the new stream is playing.
+  var reconnectTimer = null;
+  function needReconnect() {
+    if (!lastStreaming) return;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(reconnectNow, 1200);
+  }
+  function reconnectNow() {
+    try {
+      var v = mainVideo(), shot = '';
+      if (v && v.videoWidth) {
+        var w = 960, h = Math.round(w * v.videoHeight / v.videoWidth);
+        var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+        cv.getContext('2d').drawImage(v, 0, 0, w, h);
+        shot = cv.toDataURL('image/jpeg', 0.75);
+      }
+      sessionStorage.setItem('cp.resume', JSON.stringify({ t: Date.now(), img: shot }));
+    } catch (e) {}
+    setTimeout(function () { location.reload(); }, 250); // lets the app finish saving
+  }
+  window.__cpReconnect = needReconnect;
   function livePicture() { C.clarityPreset = 'custom'; savePref('clarity_preset', 'custom', 's'); applyVideoStyle(); }
 
   function advancedItems() {
@@ -1522,10 +1575,7 @@
 
   function close() {
     if (!menuEl) return;
-    if (pendingReconnect) {
-      pendingReconnect = false;
-      toast('Saved. Used the next time a stream starts');
-    }
+
     clearInterval(padTimer); padTimer = null;
     window.removeEventListener('keydown', onKey, true);
     menuEl.remove(); menuEl = null; rows = [];
