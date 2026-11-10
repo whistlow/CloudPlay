@@ -1406,8 +1406,21 @@
   var floatGear = null;
   // Any gear already in the game's bar? (Checked by presence: the copied wrapper can report
   // zero size even while its icon shows.) The floating gear is only a backup for when there's none.
+  // Is this gear really on screen? Measured on its icon (wrappers can report zero size) and
+  // confirmed by what's actually at that spot, so hidden or clipped copies don't count.
+  function reallyVisible(el) {
+    var icon = el.querySelector('svg') || el;
+    var r = icon.getBoundingClientRect();
+    if (r.width < 4 || r.height < 4 || r.right < 0 || r.bottom < 0 || r.left > innerWidth || r.top > innerHeight) return false;
+    var x = Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2));
+    var y = Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2));
+    var hit = document.elementFromPoint(x, y);
+    return !!hit && (el === hit || el.contains(hit) || hit.contains(el));
+  }
   function gearVisibleInHud() {
-    return !!document.querySelector('.cp-hud-gear, .cp-bar-gear, #StreamHud button[title="Settings"]');
+    var gs = document.querySelectorAll('.cp-hud-gear, .cp-bar-gear, #StreamHud button[title="Settings"]');
+    for (var i = 0; i < gs.length; i++) if (reallyVisible(gs[i])) return true;
+    return false;
   }
 
   // Xbox's newer in-game bar (Xbox logo + dots) isn't the old "StreamHud", so find it by
@@ -1454,11 +1467,15 @@
     return best;
   }
   function ensureBarGear() {
-    var existing = document.querySelector('.cp-bar-gear');
-    if (existing && existing.isConnected) return;
-    if (findHud() && document.querySelector('.cp-hud-gear')) return; // classic bar already has one
-    var bar = findStreamBar();
-    if (!bar) return;
+    if (menuOpen) return;
+    var gears = document.querySelectorAll('.cp-bar-gear');
+    for (var i = 0; i < gears.length; i++) if (reallyVisible(gears[i])) return; // one is showing
+    var bar0 = findStreamBar();
+    if (!bar0) return;
+    // A gear already sitting in the visible bar (just clipped for a moment)? Keep it.
+    for (var j = 0; j < gears.length; j++) if (gears[j].parentElement === bar0.row) return;
+    if (findHud() && document.querySelector('.cp-hud-gear') && reallyVisible(document.querySelector('.cp-hud-gear'))) return;
+    var bar = bar0;
     var row = bar.row;
     // the direct child of the row that holds each button ("unit": button or its wrapper)
     var units = bar.buttons.map(function (b) {
