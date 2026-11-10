@@ -143,60 +143,64 @@
     })();
   })();
 
-  // Xbox's Guide panel (left rail: Home, friends, chats, profile) can pop open by itself as
-  // the site starts with a controller connected, before you're signed in; it looks like the
-  // old layout. Close it when it opens without you pressing the Xbox button.
+  // Xbox's Guide panel (a full-screen overlay with a rail of icons down the left: Xbox,
+  // friends, chats, profile) looks like the old layout and pops up by itself, e.g. after
+  // switching apps. It's closed as soon as it appears, so only the regular layout shows.
   (function () {
-    var lastXbox = -1e9, t0 = Date.now(), lastTry = 0, xWas = {};
-    // Coming back to the app: a Guide left open as you switched away gets closed too.
-    document.addEventListener('visibilitychange', function () {
-      if (document.visibilityState !== 'visible') return;
-      t0 = Date.now(); lastXbox = -1e9;
-      try { mo.observe(document.documentElement, { childList: true, subtree: true }); } catch (e) {}
-      setTimeout(function () { var r = guideRoot(); if (r) closeGuide(r); }, 300);
-    });
-    setInterval(function () {
-      try {
-        var list = navigator.getGamepads ? navigator.getGamepads() : [];
-        for (var i = 0; i < list.length; i++) {
-          var b = list[i] && list[i].buttons && list[i].buttons[16];
-          var down = !!(b && b.pressed);
-          if (down && !xWas[i]) lastXbox = Date.now(); // a new press, not a stuck one
-          xWas[i] = down;
-        }
-      } catch (e) {}
-    }, 50);
-    function guideRoot() {
-      var el = document.querySelector('[class*="HomeLandingPage-module"],[class*="GuideMenu"],[class*="Guide-module"]');
-      if (!el) return null;
-      // Only the pop-up panel, never the page itself.
-      return el.closest('[role="dialog"],[aria-modal="true"],[class*="Guide"]');
+    function visible(el) {
+      var r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
     }
-    function closeGuide(root) {
-      var btn = null;
-      var scope = root;
-      for (var up = 0; up < 4 && scope && !btn; up++, scope = scope.parentElement) {
-        btn = scope.querySelector('button[aria-label*="lose" i],button[title*="lose" i],button[class*="lose"]');
+    function overlayOf(el, vw, vh) {
+      for (var a = el.parentElement; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+        var cs = getComputedStyle(a);
+        if (cs.position !== 'fixed' && cs.position !== 'absolute') continue;
+        var r = a.getBoundingClientRect();
+        if (r.width >= vw * 0.7 && r.height >= vh * 0.7) return a;
       }
-      if (btn) { btn.click(); return true; }
-      try {
-        ['keydown', 'keyup'].forEach(function (t) {
-          document.dispatchEvent(new KeyboardEvent(t, { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
-        });
-      } catch (e) {}
-      return false;
+      return null;
     }
+    function hasLeftRail(ov, vw, vh) {
+      var n = 0;
+      ov.querySelectorAll('button,a,[role="tab"],[tabindex]').forEach(function (b) {
+        var r = b.getBoundingClientRect();
+        if (r.width > 0 && r.left < vw * 0.14 && r.right < vw * 0.16 && r.top > vh * 0.15) n++;
+      });
+      return n >= 3;
+    }
+    function findGuideClose() {
+      var vw = innerWidth, vh = innerHeight;
+      var btns = document.querySelectorAll('button,[role="button"]');
+      for (var i = 0; i < btns.length; i++) {
+        var b = btns[i];
+        if (b.closest('.cpm,.cpm-backdrop,.cp-gpu')) continue;
+        var r = b.getBoundingClientRect();
+        if (!(r.width > 0 && r.width < 90 && r.height < 90 && r.right > vw * 0.85 && r.top < vh * 0.2)) continue;
+        var ov = overlayOf(b, vw, vh);
+        if (ov && visible(ov) && hasLeftRail(ov, vw, vh)) return b;
+      }
+      return null;
+    }
+    var lastTry = 0;
+    function check() {
+      if (lastStreaming) return; // in a game the Xbox button opens the stream's own menu
+      if (Date.now() - lastTry < 400) return;
+      var b = findGuideClose();
+      if (b) { lastTry = Date.now(); b.click(); }
+    }
+    var pending = false;
     var mo = new MutationObserver(function () {
-      if (Date.now() - t0 > 20000) { mo.disconnect(); return; } // only while starting or returning
-      if (Date.now() - lastXbox < 2500) return; // you opened it
-      if (Date.now() - lastTry < 800) return;
-      var root = guideRoot();
-      if (root) { lastTry = Date.now(); closeGuide(root); }
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(function () { pending = false; check(); });
     });
     (function watch() {
       if (!document.documentElement) return setTimeout(watch, 30);
       mo.observe(document.documentElement, { childList: true, subtree: true });
     })();
+    setInterval(check, 500);
+    window.addEventListener('focus', function () { setTimeout(check, 200); });
+    window.__cpGuideCheck = check;
   })();
 
   // Settings changed in App settings arrive here and apply in place, without reloading.
@@ -212,6 +216,7 @@
   };
   window.__cpBackground = function (away) {
     bgAway = away;
+    if (!away && window.__cpGuideCheck) { setTimeout(__cpGuideCheck, 150); setTimeout(__cpGuideCheck, 800); }
     if (C.bgAudio) return;
     try { if (boost.ctx) { if (away) boost.ctx.suspend(); else boost.ctx.resume(); } } catch (e) {}
     if (away) {
