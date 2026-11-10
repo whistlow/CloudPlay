@@ -97,7 +97,12 @@ public class MainActivity extends AppCompatActivity {
             if (prev != null) prev.uncaughtException(t, ex);
         });
         PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
-        // One-time: zero-buffer mode off (it caused blocky video glitches on busy Wi-Fi).
+        // One-time: the app's own engine by default. The bundled enhancement engine rewrites the
+        // Xbox site's code and can bring back the older home layout; the app covers its features.
+        if (!prefs().getBoolean("engine_basic_v1", false)) {
+            prefs().edit().putString("engine", "cloudplay").putBoolean("engine_basic_v1", true).apply();
+        }
+                // One-time: zero-buffer mode off (it caused blocky video glitches on busy Wi-Fi).
         if (!prefs().getBoolean("ll_off_v1", false)) {
             prefs().edit().putBoolean("low_latency", false).putBoolean("ll_off_v1", true).apply();
         }
@@ -209,7 +214,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean useBetterXcloud() {
-        return "betterxcloud".equals(prefs().getString("engine", "betterxcloud"));
+        return "betterxcloud".equals(prefs().getString("engine", "cloudplay"));
     }
 
     private static void applyChromeBrands(WebSettings s) {
@@ -357,7 +362,7 @@ public class MainActivity extends AppCompatActivity {
             o.put("region", p.getString("region", "auto"));
             o.put("videoFit", p.getString("video_fit", "contain"));
             o.put("showStats", p.getBoolean("show_stats", false));
-            o.put("engine", p.getString("engine", "betterxcloud"));
+            o.put("engine", p.getString("engine", "cloudplay"));
             JSONObject v = videoConfig();
             for (java.util.Iterator<String> it = v.keys(); it.hasNext(); ) {
                 String k = it.next();

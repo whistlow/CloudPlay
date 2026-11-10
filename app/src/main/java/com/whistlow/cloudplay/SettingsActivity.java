@@ -196,10 +196,10 @@ public class SettingsActivity extends AppCompatActivity {
                 return true;
             });
             if (preset != null) preset.setOnPreferenceChangeListener((p, v) -> {
-                applyEnabled(engine != null ? engine.getValue() : "betterxcloud", (String) v);
+                applyEnabled(engine != null ? engine.getValue() : "cloudplay", (String) v);
                 return true;
             });
-            applyEnabled(engine != null ? engine.getValue() : "betterxcloud",
+            applyEnabled(engine != null ? engine.getValue() : "cloudplay",
                     preset != null ? preset.getValue() : "off");
         }
 

@@ -33,7 +33,7 @@
             app:title="Streaming engine"
             app:entries="@array/engine_entries"
             app:entryValues="@array/engine_values"
-            app:defaultValue="betterxcloud"
+            app:defaultValue="cloudplay"
             app:useSimpleSummaryProvider="true"
             app:iconSpaceReserved="false" />
         <Preference

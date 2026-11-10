@@ -60,8 +60,8 @@
     </string-array>
 
     <string-array name="engine_entries">
-        <item>Advanced (full feature set, in-page settings)</item>
-        <item>Basic (settings below)</item>
+        <item>Better xCloud add-on (changes the Xbox site)</item>
+        <item>App engine (recommended, plain Xbox site)</item>
     </string-array>
     <string-array name="engine_values">
         <item>betterxcloud</item>
