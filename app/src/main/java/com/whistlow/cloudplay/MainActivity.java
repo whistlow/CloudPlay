@@ -57,6 +57,7 @@ public class MainActivity extends AppCompatActivity {
     static final String DEFAULT_URL = "https://www.xbox.com/en-us/play";
     static final String KEY_REGIONS = "known_regions";
     static final String KEY_PENDING_CLEAR = "pending_clear";
+    static final String EXTRA_EXIT = "exit";
     private static final long MENU_HOLD_MS = 1000;
 
     private WebView webView;
@@ -87,7 +88,12 @@ public class MainActivity extends AppCompatActivity {
         scriptBody = readAsset("cloudplay.js");
         rumbler = new Rumbler(this);
 
+        if (getIntent() != null && getIntent().getBooleanExtra(EXTRA_EXIT, false)) {
+            finishAndRemoveTask();
+            return;
+        }
         createWebView(savedInstanceState);
+        askNotificationPermissionOnce();
 
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
@@ -337,6 +343,8 @@ public class MainActivity extends AppCompatActivity {
             o.put("remotePlayMode", p.getString("remote_play_mode", "standard"));
             o.put("fastArt", p.getBoolean("fast_art", true));
             o.put("rpResolution", p.getString("rp_resolution", "auto"));
+            o.put("keepAlive", p.getBoolean("keep_alive", true));
+            o.put("bgAudio", p.getBoolean("bg_audio", false));
             o.put("startUrl", startUrl());
         } catch (JSONException ignored) {
         }
@@ -543,16 +551,66 @@ public class MainActivity extends AppCompatActivity {
         updateGear();
         InputManager im = (InputManager) getSystemService(Context.INPUT_SERVICE);
         if (im != null) im.registerInputDeviceListener(gamepads, handler);
+        updateKeepAlive();
         enterImmersive();
+    }
+
+    // ------------------------------------------------------------ background
+
+    private boolean keepAlive() {
+        return prefs().getBoolean("keep_alive", true);
+    }
+
+    /** Start (while we're in the foreground, as Android requires) or stop the keep-alive service. */
+    private void updateKeepAlive() {
+        Intent svc = new Intent(this, KeepAliveService.class);
+        if (keepAlive()) {
+            try {
+                androidx.core.content.ContextCompat.startForegroundService(this, svc);
+            } catch (Exception ignored) {
+            }
+        } else {
+            stopService(svc);
+        }
+    }
+
+    private void askNotificationPermissionOnce() {
+        if (Build.VERSION.SDK_INT < 33 || !keepAlive()) return;
+        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+        if (prefs().getBoolean("asked_notifications", false)) return;
+        prefs().edit().putBoolean("asked_notifications", true).apply();
+        requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 7);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (intent != null && intent.getBooleanExtra(EXTRA_EXIT, false)) finishAndRemoveTask();
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        if (webView != null) webView.evaluateJavascript("window.__cpBackground&&__cpBackground(false)", null);
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        if (webView != null && keepAlive()) {
+            webView.evaluateJavascript("window.__cpBackground&&__cpBackground(true)", null);
+        }
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         handler.removeCallbacks(showMenuRunnable);
-        releaseWifiLock();
+        if (!keepAlive()) releaseWifiLock(); // keep the fast Wi-Fi while the game runs in the background
         rumbler.stop();
         gamepads.releaseAll();
+        pushPads(); // let the game see all buttons released
         InputManager im = (InputManager) getSystemService(Context.INPUT_SERVICE);
         if (im != null) im.unregisterInputDeviceListener(gamepads);
         CookieManager.getInstance().flush();
@@ -566,6 +624,8 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        stopService(new Intent(this, KeepAliveService.class));
+        releaseWifiLock();
         if (webView != null) webView.destroy();
         super.onDestroy();
     }

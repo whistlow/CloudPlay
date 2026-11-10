@@ -45,6 +45,32 @@
 
   function native() { return window.CloudPlayNative; }
 
+  // Background play: the page always believes it's on screen, so the game isn't paused or
+  // ended when you switch apps. The app mutes it while you're away (unless sound is allowed).
+  if (C.keepAlive !== false) {
+    try {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: function () { return 'visible'; } });
+      Object.defineProperty(document, 'hidden', { configurable: true, get: function () { return false; } });
+      ['visibilitychange', 'webkitvisibilitychange', 'pagehide', 'freeze'].forEach(function (t) {
+        window.addEventListener(t, function (e) { e.stopImmediatePropagation(); }, true);
+        document.addEventListener(t, function (e) { e.stopImmediatePropagation(); }, true);
+      });
+    } catch (e) {}
+  }
+  var bgMuted = [];
+  window.__cpBackground = function (away) {
+    if (C.bgAudio) return;
+    if (away) {
+      bgMuted = [];
+      document.querySelectorAll('video, audio').forEach(function (m) {
+        if (!m.muted) { m.muted = true; bgMuted.push(m); }
+      });
+    } else {
+      bgMuted.forEach(function (m) { m.muted = false; });
+      bgMuted = [];
+    }
+  };
+
   // Keep the Xbox website looking exactly like Microsoft's: the advanced engine only adds
   // settings. Applied once per install (and to existing installs on update); everything
   // stays changeable in Settings afterwards.

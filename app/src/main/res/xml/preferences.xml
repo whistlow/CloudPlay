@@ -224,6 +224,18 @@
 
     <PreferenceCategory app:title="Performance" app:iconSpaceReserved="false">
         <SwitchPreferenceCompat
+            app:key="keep_alive"
+            app:title="Keep running in the background"
+            app:summary="Your game keeps going when you switch to another app. Shows a notification while running."
+            app:defaultValue="true"
+            app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat
+            app:key="bg_audio"
+            app:title="Sound while in the background"
+            app:summary="Off: the game is muted while you're in another app"
+            app:defaultValue="false"
+            app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat
             app:key="fast_art"
             app:title="Faster page loading"
             app:summary="Downloads game artwork as smaller images so pages fill in quicker"
