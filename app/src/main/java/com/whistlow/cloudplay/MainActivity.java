@@ -374,6 +374,7 @@ public class MainActivity extends AppCompatActivity {
             o.put("remotePlayMode", p.getString("remote_play_mode", "auto"));
             o.put("fastArt", p.getBoolean("fast_art", true));
             o.put("rpResolution", p.getString("rp_resolution", "auto"));
+            o.put("rpSharpen", p.getString("rp_sharpen", "medium"));
             o.put("keepAlive", p.getBoolean("keep_alive", true));
             o.put("volume", p.getInt("volume", 100));
             o.put("latencyMode", p.getString("latency_mode", "balanced"));

@@ -544,41 +544,174 @@
 
   // ========================================================= clarity boost
   // Two algorithms: a 3x3 sharpen kernel, and an unsharp mask (blur + subtract).
+  // Sharpening level for the GPU pass (0 = off). The enhancement engine does its own.
+  function gpuLevel() {
+    if (bxOn()) return 0;
+    if (PURE_RP) return ({ off: 0, low: 3, medium: 5, high: 7 })[C.rpSharpen || 'medium'] || 0;
+    return Math.max(0, Math.min(10, parseInt(C.sharpness, 10) || 0));
+  }
+
   function applyVideoStyle() {
     var old = document.getElementById('cp-style'); if (old) old.remove();
     var oldSvg = document.getElementById('cp-svg'); if (oldSvg) oldSvg.remove();
 
+    var gpuOn = gpuLevel() > 0 && gpuSupported();
     var filters = [];
-    var lvl = (bxOn() || PURE_RP) ? 0 : (parseInt(C.sharpness, 10) || 0);
-    if (lvl > 0) {
-      var f;
-      if (C.clarityAlgo === 'unsharp') {
-        var a = lvl * 0.18;
-        f = '<feGaussianBlur in="SourceGraphic" stdDeviation="1.2" result="b"/>' +
-          '<feComposite in="SourceGraphic" in2="b" operator="arithmetic" k1="0" k2="' + (1 + a).toFixed(3) +
-          '" k3="-' + a.toFixed(3) + '" k4="0"/>';
-      } else {
-        var k = (lvl * 0.06).toFixed(3), c = (1 + 4 * lvl * 0.06).toFixed(3);
-        f = '<feConvolveMatrix order="3" preserveAlpha="true" kernelMatrix="0 -' + k + ' 0 -' + k + ' ' + c +
-          ' -' + k + ' 0 -' + k + ' 0"/>';
-      }
-      var holder = document.createElement('div');
-      holder.innerHTML = '<svg id="cp-svg" width="0" height="0" style="position:absolute">' +
-        '<filter id="cp-sharpen" color-interpolation-filters="sRGB">' + f + '</filter></svg>';
-      document.body.appendChild(holder.firstChild);
-      filters.push('url(#cp-sharpen)');
+    // Colour tweaks: done inside the GPU pass when it runs, otherwise as cheap CSS filters.
+    if (!gpuOn && !bxOn()) {
+      if (C.saturation && C.saturation !== 100) filters.push('saturate(' + C.saturation / 100 + ')');
+      if (C.contrast && C.contrast !== 100) filters.push('contrast(' + C.contrast / 100 + ')');
+      if (C.brightness && C.brightness !== 100) filters.push('brightness(' + C.brightness / 100 + ')');
     }
-    if (!bxOn() && C.saturation && C.saturation !== 100) filters.push('saturate(' + C.saturation / 100 + ')');
-    if (!bxOn() && C.contrast && C.contrast !== 100) filters.push('contrast(' + C.contrast / 100 + ')');
-    if (!bxOn() && C.brightness && C.brightness !== 100) filters.push('brightness(' + C.brightness / 100 + ')');
-
     var style = document.createElement('style');
     style.id = 'cp-style';
     style.textContent = 'video{' + (bxOn() ? '' : 'object-fit:' + (C.videoFit || 'contain') + ' !important;') +
       (filters.length ? 'filter:' + filters.join(' ') + ' !important;' : '') + '}' +
       'html,body{overscroll-behavior:none;}';
-    document.head.appendChild(style);
+    (document.head || document.documentElement).appendChild(style);
+    if (gpu) gpu.settingsChanged = true;
   }
+
+  // ============================================================ GPU picture
+  // Each video frame is drawn through a WebGL2 pass on the graphics chip: contrast-adaptive
+  // sharpening (restores detail softened by video compression, without halos) plus the
+  // saturation / contrast / brightness settings. Runs per decoded frame, so no added delay.
+  var gpu = null, gpuOk = null;
+  function gpuSupported() {
+    if (gpuOk === null) {
+      try { gpuOk = !!document.createElement('canvas').getContext('webgl2'); } catch (e) { gpuOk = false; }
+    }
+    return gpuOk;
+  }
+
+  var GPU_VS = '#version 300 es\nin vec2 p;out vec2 uv;uniform vec4 crop;' +
+    'void main(){uv=crop.xy+(p*0.5+0.5)*crop.zw;uv.y=1.0-uv.y;gl_Position=vec4(p,0.0,1.0);}';
+  var GPU_FS = '#version 300 es\nprecision highp float;in vec2 uv;out vec4 o;' +
+    'uniform sampler2D t;uniform vec2 px;uniform float amt;uniform vec3 col;' +
+    'void main(){' +
+    'vec3 c=texture(t,uv).rgb;' +
+    'vec3 n=texture(t,uv+vec2(0.0,-px.y)).rgb,w=texture(t,uv+vec2(-px.x,0.0)).rgb,' +
+    'e=texture(t,uv+vec2(px.x,0.0)).rgb,s=texture(t,uv+vec2(0.0,px.y)).rgb;' +
+    'vec3 mn=min(c,min(min(n,s),min(w,e)));vec3 mx=max(c,max(max(n,s),max(w,e)));' +
+    // sharpen less where local contrast is already high (no halos / ringing)
+    'vec3 k=sqrt(clamp(min(mn,1.0-mx)/max(mx,vec3(1e-4)),0.0,1.0));' +
+    'vec3 wt=-k*amt;' +
+    'vec3 r=clamp((c+(n+s+w+e)*wt)/(1.0+4.0*wt),0.0,1.0);' +
+    'r*=col.z;r=(r-0.5)*col.y+0.5;float l=dot(r,vec3(0.2126,0.7152,0.0722));' +
+    'r=mix(vec3(l),r,col.x);o=vec4(clamp(r,0.0,1.0),1.0);}';
+
+  function mainVideo() {
+    var best = null, area = 0;
+    document.querySelectorAll('video').forEach(function (v) {
+      if (!v.srcObject && !v.src) return;
+      var r = v.getBoundingClientRect(), a = r.width * r.height;
+      if (a > area) { area = a; best = v; }
+    });
+    return area > 20000 ? best : null;
+  }
+
+  function gpuStart(video) {
+    var canvas = document.createElement('canvas');
+    canvas.className = 'cp-gpu';
+    canvas.style.cssText = 'position:absolute;pointer-events:none;margin:0;padding:0;border:0;';
+    var gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false,
+      desynchronized: true, powerPreference: 'high-performance', preserveDrawingBuffer: false });
+    if (!gl) return null;
+    function sh(type, src) {
+      var o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o);
+      if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o));
+      return o;
+    }
+    var prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, GPU_VS));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, GPU_FS));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+    var buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+    var loc = gl.getAttribLocation(prog, 'p');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    var tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER].forEach(function (k) { gl.texParameteri(gl.TEXTURE_2D, k, gl.LINEAR); });
+    [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T].forEach(function (k) { gl.texParameteri(gl.TEXTURE_2D, k, gl.CLAMP_TO_EDGE); });
+    var U = {};
+    ['crop', 'px', 'amt', 'col'].forEach(function (n) { U[n] = gl.getUniformLocation(prog, n); });
+
+    var g = { video: video, canvas: canvas, gl: gl, prog: prog, U: U, handle: 0, alive: true, settingsChanged: true };
+    video.insertAdjacentElement('afterend', canvas);
+
+    function layout() {
+      var vw = video.videoWidth, vh = video.videoHeight;
+      if (!vw || !vh) return;
+      var ew = video.clientWidth, eh = video.clientHeight;
+      var fit = C.videoFit || 'contain', cw = ew, ch = eh, crop = [0, 0, 1, 1];
+      if (fit === 'contain') {
+        var sc = Math.min(ew / vw, eh / vh); cw = vw * sc; ch = vh * sc;
+      } else if (fit === 'cover') {
+        var sv = Math.max(ew / vw, eh / vh), uw = ew / (vw * sv), uh = eh / (vh * sv);
+        crop = [(1 - uw) / 2, (1 - uh) / 2, uw, uh];
+      }
+      var st = canvas.style;
+      st.left = (video.offsetLeft + (ew - cw) / 2) + 'px';
+      st.top = (video.offsetTop + (eh - ch) / 2) + 'px';
+      st.width = cw + 'px'; st.height = ch + 'px';
+      if (canvas.width !== vw || canvas.height !== vh) { canvas.width = vw; canvas.height = vh; }
+      gl.viewport(0, 0, vw, vh);
+      gl.uniform4f(U.crop, crop[0], crop[1], crop[2], crop[3]);
+      gl.uniform2f(U.px, 1 / vw, 1 / vh);
+    }
+    g.layout = layout;
+
+    function draw() {
+      if (!g.alive) return;
+      if (video.readyState >= 2) {
+        if (g.settingsChanged) {
+          g.settingsChanged = false;
+          var lvl = gpuLevel();
+          // 0..10 -> 0..0.2 sharpening weight (0.2 is strong)
+          gl.uniform1f(U.amt, lvl / 50);
+          var sat = PURE_RP ? 1 : (C.saturation || 100) / 100;
+          var con = PURE_RP ? 1 : (C.contrast || 100) / 100;
+          var bri = PURE_RP ? 1 : (C.brightness || 100) / 100;
+          gl.uniform3f(U.col, sat, con, bri);
+          layout();
+        }
+        try {
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+        } catch (e) {}
+      }
+      schedule();
+    }
+    function schedule() {
+      if (!g.alive) return;
+      if (video.requestVideoFrameCallback) g.handle = video.requestVideoFrameCallback(draw);
+      else g.handle = requestAnimationFrame(draw);
+    }
+    g.stop = function () {
+      g.alive = false;
+      try { if (video.cancelVideoFrameCallback) video.cancelVideoFrameCallback(g.handle); else cancelAnimationFrame(g.handle); } catch (e) {}
+      canvas.remove();
+      try { var ext = gl.getExtension('WEBGL_lose_context'); if (ext) ext.loseContext(); } catch (e) {}
+    };
+    schedule();
+    return g;
+  }
+
+  // Attach to the playing stream (and re-attach when it changes); follow size changes.
+  setInterval(function () {
+    var want = gpuLevel() > 0 && gpuSupported() && !!lastStreaming;
+    var v = want ? mainVideo() : null;
+    if (gpu && (!want || gpu.video !== v || !gpu.canvas.isConnected)) { gpu.stop(); gpu = null; }
+    if (!gpu && v) { try { gpu = gpuStart(v); } catch (e) { gpu = null; gpuOk = false; applyVideoStyle(); } }
+    if (gpu) gpu.layout();
+  }, 1000);
+  window.addEventListener('resize', function () { if (gpu) gpu.settingsChanged = true; });
+
   onReady(applyVideoStyle);
 
   // Called by the app to switch clarity presets live, without reloading.
@@ -925,6 +1058,11 @@
       { label: 'Stream stats', detail: C.showStats ? 'On' : 'Off', go: function () {
         C.showStats = !C.showStats; savePref('show_stats', C.showStats); render('remote', focusIdx);
       } },
+      { label: 'Sharpening', sub: 'Crisper picture, done on the graphics chip',
+        detail: nameOf([['off', 'Off'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], C.rpSharpen || 'medium'), go: function () {
+        var n = nextOf([['off', 'Off'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], C.rpSharpen || 'medium');
+        C.rpSharpen = n[0]; savePref('rp_sharpen', n[0]); applyVideoStyle(); render('remote', focusIdx);
+      } },
       { label: 'Resolution', sub: 'Applies next time you connect', detail: nameOf(RP_RES, C.rpResolution || 'auto'), go: function () {
         var n = nextOf(RP_RES, C.rpResolution || 'auto');
         C.rpResolution = n[0]; savePref('rp_resolution', n[0]); render('remote', focusIdx);
@@ -1104,6 +1242,8 @@
       toggle('Faster page loading', 'fast_art', 'fastArt'),
       { header: 'Remote Play' },
       choice('Connection', 'remote_play_mode', 'remotePlayMode', [['auto', 'Auto (fastest)'], ['standard', 'Standard']], { sub: NEXT, reconnect: true }),
+      choice('Sharpening', 'rp_sharpen', 'rpSharpen', [['medium', 'Medium'], ['high', 'High'], ['low', 'Low'], ['off', 'Off']],
+        { sub: 'Graphics-chip sharpening for a crisper picture than the website', live: function () { applyVideoStyle(); } }),
       choice('Resolution', 'rp_resolution', 'rpResolution', [['auto', 'Auto (1080p)'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']], { sub: NEXT, reconnect: true })
     ];
   }
