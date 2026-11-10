@@ -1026,6 +1026,15 @@
 
   function advancedItems() {
     return [
+      { header: 'Latency' },
+      choice('Latency', 'latency_mode', 'latencyMode', [['balanced', 'Balanced'], ['lowest', 'Lowest']], {
+        sub: 'Lowest: 720p and no video buffer for the quickest response. Applies when the next game starts.',
+        live: function (v) {
+          var low = v === 'lowest';
+          C.resolution = low ? '720p' : '1080p'; savePref('resolution', C.resolution, 's');
+          C.lowLatency = low; savePref('low_latency', low, 'b');
+        }
+      }),
       { header: 'Stream' },
       choice('Resolution', 'resolution', 'resolution', [['auto', 'Auto'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']], { sub: NEXT }),
       choice('Video codec', 'codec', 'codec', [['auto', 'Auto'], ['h264_high', 'H.264 High'], ['h264_main', 'H.264 Main'], ['h264_baseline', 'H.264 Baseline']], { sub: NEXT }),

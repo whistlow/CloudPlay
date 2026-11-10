@@ -376,6 +376,7 @@ public class MainActivity extends AppCompatActivity {
             o.put("rpResolution", p.getString("rp_resolution", "auto"));
             o.put("keepAlive", p.getBoolean("keep_alive", true));
             o.put("volume", p.getInt("volume", 100));
+            o.put("latencyMode", p.getString("latency_mode", "balanced"));
             o.put("buttonLayout", p.getString("button_layout", "xbox"));
             o.put("deadzone", p.getInt("deadzone", 5));
             o.put("invertY", p.getBoolean("invert_y", false));
@@ -769,13 +770,13 @@ public class MainActivity extends AppCompatActivity {
                 || (src & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK;
     }
 
-    // Controller state is pushed to the page when it changes: at most once per screen refresh
-    // and one update in flight at a time, so a busy stick can never flood the page or starve
-    // drawing (which froze the app). The game's controller reads never wait on the app.
+    // Controller state is sent to the page the instant it changes (no waiting for the next
+    // screen refresh), with only one update in flight at a time: anything that changes while
+    // one is on its way is folded into the next. Fast, and a busy stick can't flood the page.
     private int pushedPadVersion = -1;
-    private boolean padPushPending, padInFlight;
-    private final android.view.Choreographer.FrameCallback padPush = frameTime -> {
-        padPushPending = false;
+    private boolean padInFlight;
+
+    private void pushPads() {
         if (padInFlight || webView == null) return;
         int v = gamepads.version();
         if (v == pushedPadVersion) return;
@@ -785,12 +786,6 @@ public class MainActivity extends AppCompatActivity {
             padInFlight = false;
             if (gamepads.version() != pushedPadVersion) pushPads();
         });
-    };
-
-    private void pushPads() {
-        if (padPushPending || padInFlight || gamepads.version() == pushedPadVersion) return;
-        padPushPending = true;
-        android.view.Choreographer.getInstance().postFrameCallback(padPush);
     }
 
     @Override
