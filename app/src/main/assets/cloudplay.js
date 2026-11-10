@@ -147,13 +147,22 @@
   // the site starts with a controller connected, before you're signed in; it looks like the
   // old layout. Close it when it opens without you pressing the Xbox button.
   (function () {
-    var lastXbox = -1e9, t0 = Date.now(), lastTry = 0;
+    var lastXbox = -1e9, t0 = Date.now(), lastTry = 0, xWas = {};
+    // Coming back to the app: a Guide left open as you switched away gets closed too.
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState !== 'visible') return;
+      t0 = Date.now(); lastXbox = -1e9;
+      try { mo.observe(document.documentElement, { childList: true, subtree: true }); } catch (e) {}
+      setTimeout(function () { var r = guideRoot(); if (r) closeGuide(r); }, 300);
+    });
     setInterval(function () {
       try {
         var list = navigator.getGamepads ? navigator.getGamepads() : [];
         for (var i = 0; i < list.length; i++) {
           var b = list[i] && list[i].buttons && list[i].buttons[16];
-          if (b && b.pressed) lastXbox = Date.now();
+          var down = !!(b && b.pressed);
+          if (down && !xWas[i]) lastXbox = Date.now(); // a new press, not a stuck one
+          xWas[i] = down;
         }
       } catch (e) {}
     }, 50);
@@ -178,7 +187,7 @@
       return false;
     }
     var mo = new MutationObserver(function () {
-      if (Date.now() - t0 > 30000) { mo.disconnect(); return; } // only while the site starts up
+      if (Date.now() - t0 > 20000) { mo.disconnect(); return; } // only while starting or returning
       if (Date.now() - lastXbox < 2500) return; // you opened it
       if (Date.now() - lastTry < 800) return;
       var root = guideRoot();

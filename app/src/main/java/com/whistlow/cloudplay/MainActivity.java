@@ -72,6 +72,8 @@ public class MainActivity extends AppCompatActivity {
     private String bxScript;
     private Rumbler rumbler;
     private final GamepadBridge gamepads = new GamepadBridge();
+    private Runnable modeRunnable;
+    private boolean modeHeld, modeLeft;
     private String appliedConfig;
     private String appliedUrl;
     private WifiManager.WifiLock wifiLock;
@@ -692,6 +694,8 @@ public class MainActivity extends AppCompatActivity {
         handler.removeCallbacks(showMenuRunnable);
         if (!keepAlive()) releaseWifiLock(); // keep the fast Wi-Fi while the game runs in the background
         rumbler.stop();
+        modeLeft = true;
+        if (modeRunnable != null) handler.removeCallbacks(modeRunnable);
         gamepads.releaseAll();
         pushPads(); // let the game see all buttons released
         InputManager im = (InputManager) getSystemService(Context.INPUT_SERVICE);
@@ -824,6 +828,39 @@ public class MainActivity extends AppCompatActivity {
     public boolean dispatchKeyEvent(KeyEvent e) {
         int code = e.getKeyCode();
         boolean fromPad = isFromGamepad(e);
+
+        // Xbox/Home button: many handhelds use it to leave the app too. Passing the press
+        // straight on opened Xbox's Guide panel as you left, so it was still open when you came
+        // back. Now it only reaches the page if the app is still in front when it's released
+        // (a tap) or after a short hold.
+        if (code == KeyEvent.KEYCODE_BUTTON_MODE && fromPad) {
+            final InputDevice dev = e.getDevice();
+            if (e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) {
+                modeHeld = false;
+                modeLeft = false;
+                modeRunnable = () -> {
+                    if (modeLeft || !hasWindowFocus()) return;
+                    modeHeld = true;
+                    gamepads.setButton(dev, 16, 1f);
+                    pushPads();
+                };
+                handler.postDelayed(modeRunnable, 400);
+            } else if (e.getAction() == KeyEvent.ACTION_UP) {
+                if (modeRunnable != null) handler.removeCallbacks(modeRunnable);
+                modeRunnable = null;
+                if (modeHeld) {
+                    gamepads.setButton(dev, 16, 0f);
+                    pushPads();
+                } else if (!modeLeft && hasWindowFocus()) {
+                    gamepads.setButton(dev, 16, 1f);
+                    pushPads();
+                    handler.postDelayed(() -> { gamepads.setButton(dev, 16, 0f); pushPads(); }, 120);
+                }
+                modeHeld = false;
+            }
+            return true;
+        }
+
         if (fromPad && gamepads.onKey(e)) pushPads();
 
         // Hold View/Select to open the CloudPlay menu.

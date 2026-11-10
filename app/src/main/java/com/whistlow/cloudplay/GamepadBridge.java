@@ -195,6 +195,15 @@ class GamepadBridge implements InputManager.InputDeviceListener {
         return true;
     }
 
+    /** Set one button on the controller that sent this event. */
+    synchronized void setButton(InputDevice d, int idx, float v) {
+        if (!isGamepad(d)) return;
+        Pad p = pad(d);
+        if (p == null || p.b[idx] == v) return;
+        p.b[idx] = v;
+        changed(p);
+    }
+
     /** Release everything (e.g. when the app goes to the background). */
     synchronized void releaseAll() {
         for (Pad p : slots) {
