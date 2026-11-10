@@ -143,6 +143,53 @@
     })();
   })();
 
+  // Xbox's Guide panel (left rail: Home, friends, chats, profile) can pop open by itself as
+  // the site starts with a controller connected, before you're signed in; it looks like the
+  // old layout. Close it when it opens without you pressing the Xbox button.
+  (function () {
+    var lastXbox = -1e9, t0 = Date.now(), lastTry = 0;
+    setInterval(function () {
+      try {
+        var list = navigator.getGamepads ? navigator.getGamepads() : [];
+        for (var i = 0; i < list.length; i++) {
+          var b = list[i] && list[i].buttons && list[i].buttons[16];
+          if (b && b.pressed) lastXbox = Date.now();
+        }
+      } catch (e) {}
+    }, 50);
+    function guideRoot() {
+      var el = document.querySelector('[class*="HomeLandingPage-module"],[class*="GuideMenu"],[class*="Guide-module"]');
+      if (!el) return null;
+      // Only the pop-up panel, never the page itself.
+      return el.closest('[role="dialog"],[aria-modal="true"],[class*="Guide"]');
+    }
+    function closeGuide(root) {
+      var btn = null;
+      var scope = root;
+      for (var up = 0; up < 4 && scope && !btn; up++, scope = scope.parentElement) {
+        btn = scope.querySelector('button[aria-label*="lose" i],button[title*="lose" i],button[class*="lose"]');
+      }
+      if (btn) { btn.click(); return true; }
+      try {
+        ['keydown', 'keyup'].forEach(function (t) {
+          document.dispatchEvent(new KeyboardEvent(t, { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+        });
+      } catch (e) {}
+      return false;
+    }
+    var mo = new MutationObserver(function () {
+      if (Date.now() - t0 > 30000) { mo.disconnect(); return; } // only while the site starts up
+      if (Date.now() - lastXbox < 2500) return; // you opened it
+      if (Date.now() - lastTry < 800) return;
+      var root = guideRoot();
+      if (root) { lastTry = Date.now(); closeGuide(root); }
+    });
+    (function watch() {
+      if (!document.documentElement) return setTimeout(watch, 30);
+      mo.observe(document.documentElement, { childList: true, subtree: true });
+    })();
+  })();
+
   // Settings changed in App settings arrive here and apply in place, without reloading.
   window.__cpApplyCfg = function (o) {
     try {
