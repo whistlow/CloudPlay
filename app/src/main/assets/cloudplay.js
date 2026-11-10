@@ -44,6 +44,19 @@
     window.addEventListener('popstate', function () {
       if (isRP(location.href) !== PURE_RP) location.reload();
     });
+    // The site can also change pages through the Navigation API or a router that doesn't go
+    // through pushState, so watch the address itself as well.
+    if (window.navigation && navigation.addEventListener) {
+      navigation.addEventListener('navigatesuccess', function () {
+        if (isRP(location.href) !== PURE_RP) location.reload();
+      });
+    }
+    var lastPath = location.pathname;
+    setInterval(function () {
+      if (location.pathname === lastPath) return;
+      lastPath = location.pathname;
+      if (isRP(location.href) !== PURE_RP) location.reload();
+    }, 300);
   })();
   var OS_NAMES = { '720p': 'android', '1080p': 'windows', '1080p_hq': 'tizen' };
   var H264_PROFILES = { h264_high: '64', h264_main: '4d', h264_baseline: '42' };
