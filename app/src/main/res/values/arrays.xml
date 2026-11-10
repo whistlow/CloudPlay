@@ -174,4 +174,50 @@
         <item>1080p</item>
         <item>1080p_hq</item>
     </string-array>
+    <string-array name="rp_ups_entries">
+        <item>FSR 1.0 (upscale to screen)</item>
+        <item>Sharpen only</item>
+        <item>Off</item>
+    </string-array>
+    <string-array name="rp_ups_values">
+        <item>fsr</item>
+        <item>sharpen</item>
+        <item>off</item>
+    </string-array>
+    <string-array name="rp_sharp_entries">
+        <item>Off</item>
+        <item>Low</item>
+        <item>Medium</item>
+        <item>High</item>
+    </string-array>
+    <string-array name="rp_sharp_values">
+        <item>off</item>
+        <item>low</item>
+        <item>medium</item>
+        <item>high</item>
+    </string-array>
+    <string-array name="rp_buf_entries">
+        <item>Lowest delay</item>
+        <item>Slight delay (smooth)</item>
+        <item>Smoother</item>
+        <item>Smoothest</item>
+        <item>Website default</item>
+    </string-array>
+    <string-array name="rp_buf_values">
+        <item>lowest</item>
+        <item>slight</item>
+        <item>smooth</item>
+        <item>extra</item>
+        <item>auto</item>
+    </string-array>
+    <string-array name="rp_col_entries">
+        <item>Off</item>
+        <item>Light</item>
+        <item>Vivid</item>
+    </string-array>
+    <string-array name="rp_col_values">
+        <item>off</item>
+        <item>light</item>
+        <item>vivid</item>
+    </string-array>
 </resources>

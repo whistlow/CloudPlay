@@ -649,8 +649,19 @@
   // Sharpening level for the GPU pass (0 = off). The enhancement engine does its own.
   function gpuLevel() {
     if (bxOn()) return 0;
-    if (PURE_RP) return ({ off: 0, low: 3, medium: 5, high: 7 })[C.rpSharpen || 'medium'] || 0;
+    if (PURE_RP) return rpGpuMode() ? 1 : 0;
     return Math.max(0, Math.min(10, parseInt(C.sharpness, 10) || 0));
+  }
+
+  // Remote Play picture: upscaler (FSR 1.0 or sharpen only), sharpness and colour, all live.
+  function rpUpscaler() { return C.rpUpscaler || 'fsr'; }
+  function rpSharpAmt() { return ({ off: 0, low: 0.35, medium: 0.6, high: 0.9 })[C.rpSharpen || 'medium'] || 0; }
+  function rpColor() { return ({ off: [1, 1, 1], light: [1.1, 1.03, 1], vivid: [1.22, 1.06, 1.02] })[C.rpColor || 'off'] || [1, 1, 1]; }
+  function rpGpuMode() {
+    var up = rpUpscaler(), col = rpColor();
+    if (up === 'fsr') return 'fsr';
+    if (rpSharpAmt() > 0 || col[0] !== 1 || col[1] !== 1 || col[2] !== 1) return 'rcas';
+    return '';
   }
 
   function applyVideoStyle() {
@@ -701,6 +712,181 @@
     'vec3 r=clamp((c+(n+s+w+e)*wt)/(1.0+4.0*wt),0.0,1.0);' +
     'r*=col.z;r=(r-0.5)*col.y+0.5;float l=dot(r,vec3(0.2126,0.7152,0.0722));' +
     'r=mix(vec3(l),r,col.x);o=vec4(clamp(r,0.0,1.0),1.0);}';
+
+  // AMD FidelityFX Super Resolution 1.0, written for WebGL2: EASU (edge-adaptive upscaling
+  // to the screen's real pixel count) then RCAS (robust contrast-adaptive sharpening).
+  var VS_PLAIN = '#version 300 es\nin vec2 p;out vec2 uv;void main(){uv=p*0.5+0.5;gl_Position=vec4(p,0.0,1.0);}';
+  var EASU_FS = '#version 300 es\nprecision highp float;in vec2 uv;out vec4 o;uniform sampler2D t;uniform vec2 inSize;' +
+    'float L(vec3 c){return c.g+0.5*(c.r+c.b);}' +
+    'vec3 T(vec2 fp,vec2 d){return texture(t,(fp+d+0.5)/inSize).rgb;}' +
+    'void setF(inout vec2 dir,inout float len,float w,float lA,float lB,float lC,float lD,float lE){' +
+    'float lx=max(abs(lD-lC),abs(lC-lB));lx=lx>0.0?1.0/lx:0.0;float dx=lD-lB;dir.x+=dx*w;lx=clamp(abs(dx)*lx,0.0,1.0);len+=lx*lx*w;' +
+    'float ly=max(abs(lE-lC),abs(lC-lA));ly=ly>0.0?1.0/ly:0.0;float dy=lE-lA;dir.y+=dy*w;ly=clamp(abs(dy)*ly,0.0,1.0);len+=ly*ly*w;}' +
+    'void tap(inout vec3 aC,inout float aW,vec2 off,vec2 dir,vec2 len2,float lob,float clp,vec3 c){' +
+    'vec2 v=vec2(dot(off,dir),dot(off,vec2(-dir.y,dir.x)))*len2;float d2=min(dot(v,v),clp);' +
+    'float wB=0.4*d2-1.0;float wA=lob*d2-1.0;wB*=wB;wA*=wA;wB=1.5625*wB-0.5625;float w=wB*wA;aC+=c*w;aW+=w;}' +
+    'void main(){vec2 pp=uv*inSize-0.5;vec2 fp=floor(pp);pp-=fp;' +
+    'vec3 b=T(fp,vec2(0,-1)),c=T(fp,vec2(1,-1)),e=T(fp,vec2(-1,0)),f=T(fp,vec2(0,0)),g=T(fp,vec2(1,0)),h=T(fp,vec2(2,0)),' +
+    'i=T(fp,vec2(-1,1)),j=T(fp,vec2(0,1)),k=T(fp,vec2(1,1)),l=T(fp,vec2(2,1)),n=T(fp,vec2(0,2)),q=T(fp,vec2(1,2));' +
+    'float bL=L(b),cL=L(c),eL=L(e),fL=L(f),gL=L(g),hL=L(h),iL=L(i),jL=L(j),kL=L(k),lL=L(l),nL=L(n),qL=L(q);' +
+    'vec2 dir=vec2(0.0);float len=0.0;' +
+    'setF(dir,len,(1.0-pp.x)*(1.0-pp.y),bL,eL,fL,gL,jL);setF(dir,len,pp.x*(1.0-pp.y),cL,fL,gL,hL,kL);' +
+    'setF(dir,len,(1.0-pp.x)*pp.y,fL,iL,jL,kL,nL);setF(dir,len,pp.x*pp.y,gL,jL,kL,lL,qL);' +
+    'float dR=dot(dir,dir);bool z=dR<1.0/32768.0;dR=z?1.0:inversesqrt(dR);dir.x=z?1.0:dir.x;dir*=dR;' +
+    'len*=0.5;len*=len;float st=dot(dir,dir)/max(abs(dir.x),abs(dir.y));' +
+    'vec2 len2=vec2(1.0+(st-1.0)*len,1.0-0.5*len);float lob=0.5-0.29*len;float clp=1.0/lob;' +
+    'vec3 aC=vec3(0.0);float aW=0.0;' +
+    'tap(aC,aW,vec2(0,-1)-pp,dir,len2,lob,clp,b);tap(aC,aW,vec2(1,-1)-pp,dir,len2,lob,clp,c);' +
+    'tap(aC,aW,vec2(-1,1)-pp,dir,len2,lob,clp,i);tap(aC,aW,vec2(0,1)-pp,dir,len2,lob,clp,j);' +
+    'tap(aC,aW,vec2(0,0)-pp,dir,len2,lob,clp,f);tap(aC,aW,vec2(-1,0)-pp,dir,len2,lob,clp,e);' +
+    'tap(aC,aW,vec2(1,1)-pp,dir,len2,lob,clp,k);tap(aC,aW,vec2(2,1)-pp,dir,len2,lob,clp,l);' +
+    'tap(aC,aW,vec2(2,0)-pp,dir,len2,lob,clp,h);tap(aC,aW,vec2(1,0)-pp,dir,len2,lob,clp,g);' +
+    'tap(aC,aW,vec2(1,2)-pp,dir,len2,lob,clp,q);tap(aC,aW,vec2(0,2)-pp,dir,len2,lob,clp,n);' +
+    'vec3 mn=min(min(f,g),min(j,k)),mx=max(max(f,g),max(j,k));' +
+    'o=vec4(clamp(aC/max(aW,1e-5),mn,mx),1.0);}';
+  var RCAS_FS = '#version 300 es\nprecision highp float;in vec2 uv;out vec4 o;uniform sampler2D t;uniform vec2 px;' +
+    'uniform float sharp;uniform vec3 col;' +
+    'void main(){vec3 e=texture(t,uv).rgb;' +
+    'vec3 b=texture(t,uv+vec2(0.0,-px.y)).rgb,d=texture(t,uv+vec2(-px.x,0.0)).rgb,' +
+    'f=texture(t,uv+vec2(px.x,0.0)).rgb,h=texture(t,uv+vec2(0.0,px.y)).rgb;' +
+    'vec3 mn4=min(min(b,d),min(f,h)),mx4=max(max(b,d),max(f,h));' +
+    'vec3 hMin=min(mn4,e)/(4.0*mx4+1e-5);vec3 hMax=(1.0-max(mx4,e))/(4.0*mn4-4.0-1e-5);' +
+    'vec3 lr=max(-hMin,hMax);float lobe=max(-0.1875,min(max(lr.r,max(lr.g,lr.b)),0.0))*sharp;' +
+    'vec3 r=clamp((lobe*(b+d+f+h)+e)/(4.0*lobe+1.0),0.0,1.0);' +
+    'r*=col.z;r=(r-0.5)*col.y+0.5;float lu=dot(r,vec3(0.2126,0.7152,0.0722));' +
+    'r=mix(vec3(lu),r,col.x);o=vec4(clamp(r,0.0,1.0),1.0);}';
+
+  // Remote Play picture pipeline. "fsr": video -> EASU at screen resolution -> RCAS + colour.
+  // "rcas": video -> RCAS + colour at the stream's own resolution. Runs once per decoded frame.
+  function rpGpuStart(video) {
+    var canvas = document.createElement('canvas');
+    canvas.className = 'cp-gpu';
+    canvas.style.cssText = 'position:absolute;pointer-events:none;margin:0;padding:0;border:0;';
+    var gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false,
+      desynchronized: true, powerPreference: 'high-performance', preserveDrawingBuffer: false });
+    if (!gl) return null;
+    function prog(vs, fs, names) {
+      function sh(type, src) {
+        var o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o);
+        if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o));
+        return o;
+      }
+      var pr = gl.createProgram();
+      gl.attachShader(pr, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, fs));
+      gl.bindAttribLocation(pr, 0, 'p');
+      gl.linkProgram(pr);
+      if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+      var u = {}; names.forEach(function (n) { u[n] = gl.getUniformLocation(pr, n); });
+      return { p: pr, u: u };
+    }
+    // RCAS straight from the video (flipped, cropped) or from the upscaled image.
+    var pEasu = prog(GPU_VS, EASU_FS, ['crop', 'inSize']);
+    var pRcasVid = prog(GPU_VS, RCAS_FS, ['crop', 'px', 'sharp', 'col']);
+    var pRcasFbo = prog(VS_PLAIN, RCAS_FS, ['px', 'sharp', 'col']);
+    var buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    function mkTex() {
+      var tx = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tx);
+      [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER].forEach(function (k) { gl.texParameteri(gl.TEXTURE_2D, k, gl.LINEAR); });
+      [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T].forEach(function (k) { gl.texParameteri(gl.TEXTURE_2D, k, gl.CLAMP_TO_EDGE); });
+      return tx;
+    }
+    var vidTex = mkTex(), upTex = mkTex(), fbo = gl.createFramebuffer(), upW = 0, upH = 0;
+
+    var g = { video: video, canvas: canvas, gl: gl, handle: 0, alive: true, settingsChanged: true, rp: true };
+    video.insertAdjacentElement('afterend', canvas);
+    var mode = '', outW = 0, outH = 0, crop = [0, 0, 1, 1], sharp = 0, col = [1, 1, 1];
+
+    function layout() {
+      var vw = video.videoWidth, vh = video.videoHeight;
+      if (!vw || !vh) return;
+      var ew = video.clientWidth, eh = video.clientHeight;
+      var fit = C.videoFit || 'contain', cw = ew, ch = eh;
+      crop = [0, 0, 1, 1];
+      if (fit === 'contain') {
+        var sc = Math.min(ew / vw, eh / vh); cw = vw * sc; ch = vh * sc;
+      } else if (fit === 'cover') {
+        var sv = Math.max(ew / vw, eh / vh), uw = ew / (vw * sv), uh = eh / (vh * sv);
+        crop = [(1 - uw) / 2, (1 - uh) / 2, uw, uh];
+      }
+      var st = canvas.style;
+      st.left = (video.offsetLeft + (ew - cw) / 2) + 'px';
+      st.top = (video.offsetTop + (eh - ch) / 2) + 'px';
+      st.width = cw + 'px'; st.height = ch + 'px';
+      mode = rpGpuMode();
+      sharp = rpSharpAmt(); col = rpColor();
+      var dpr = window.devicePixelRatio || 1;
+      // Screen pixels, capped at 1440p. Only upscale when the screen has more pixels than the stream.
+      var sw = Math.round(Math.min(cw * dpr, 2560)), shh = Math.round(Math.min(ch * dpr, 1440));
+      if (mode === 'fsr' && (sw <= vw * crop[2] * 1.05 || shh <= vh * crop[3] * 1.05)) mode = 'rcas';
+      if (mode === 'fsr') { outW = sw; outH = shh; } else { outW = Math.round(vw * crop[2]); outH = Math.round(vh * crop[3]); }
+      if (canvas.width !== outW || canvas.height !== outH) { canvas.width = outW; canvas.height = outH; }
+      if (mode === 'fsr' && (upW !== outW || upH !== outH)) {
+        upW = outW; upH = outH;
+        gl.bindTexture(gl.TEXTURE_2D, upTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, upW, upH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, upTex, 0);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      }
+      g.mode = mode; g.out = outW + 'x' + outH;
+    }
+    g.layout = layout;
+
+    function draw() {
+      if (!g.alive) return;
+      if (video.readyState >= 2) {
+        if (g.settingsChanged) { g.settingsChanged = false; layout(); }
+        var vw = video.videoWidth, vh = video.videoHeight;
+        try {
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, vidTex);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+          if (mode === 'fsr') {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+            gl.viewport(0, 0, outW, outH);
+            gl.useProgram(pEasu.p);
+            gl.uniform4f(pEasu.u.crop, crop[0], crop[1], crop[2], crop[3]);
+            gl.uniform2f(pEasu.u.inSize, vw, vh);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.bindTexture(gl.TEXTURE_2D, upTex);
+            gl.viewport(0, 0, outW, outH);
+            gl.useProgram(pRcasFbo.p);
+            gl.uniform2f(pRcasFbo.u.px, 1 / outW, 1 / outH);
+            gl.uniform1f(pRcasFbo.u.sharp, sharp);
+            gl.uniform3f(pRcasFbo.u.col, col[0], col[1], col[2]);
+          } else {
+            gl.viewport(0, 0, outW, outH);
+            gl.useProgram(pRcasVid.p);
+            gl.uniform4f(pRcasVid.u.crop, crop[0], crop[1], crop[2], crop[3]);
+            gl.uniform2f(pRcasVid.u.px, 1 / vw, 1 / vh);
+            gl.uniform1f(pRcasVid.u.sharp, sharp);
+            gl.uniform3f(pRcasVid.u.col, col[0], col[1], col[2]);
+          }
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+        } catch (e) {}
+      }
+      schedule();
+    }
+    function schedule() {
+      if (!g.alive) return;
+      if (video.requestVideoFrameCallback) g.handle = video.requestVideoFrameCallback(draw);
+      else g.handle = requestAnimationFrame(draw);
+    }
+    g.stop = function () {
+      g.alive = false;
+      try { if (video.cancelVideoFrameCallback) video.cancelVideoFrameCallback(g.handle); else cancelAnimationFrame(g.handle); } catch (e) {}
+      canvas.remove();
+      try { var ext = gl.getExtension('WEBGL_lose_context'); if (ext) ext.loseContext(); } catch (e) {}
+    };
+    schedule();
+    return g;
+  }
 
   function mainVideo() {
     var best = null, area = 0;
@@ -809,7 +995,7 @@
     var want = gpuLevel() > 0 && gpuSupported() && !!lastStreaming;
     var v = want ? mainVideo() : null;
     if (gpu && (!want || gpu.video !== v || !gpu.canvas.isConnected)) { gpu.stop(); gpu = null; }
-    if (!gpu && v) { try { gpu = gpuStart(v); } catch (e) { gpu = null; gpuOk = false; applyVideoStyle(); } }
+    if (!gpu && v) { try { gpu = PURE_RP ? rpGpuStart(v) : gpuStart(v); } catch (e) { gpu = null; gpuOk = false; applyVideoStyle(); } }
     if (gpu) gpu.layout();
   }, 1000);
   window.addEventListener('resize', function () { if (gpu) gpu.settingsChanged = true; });
@@ -1150,6 +1336,10 @@
   function nameOf(list, cur) { return (list.filter(function (x) { return x[0] === cur; })[0] || list[0])[1]; }
   function savePref(key, value) { try { native() && native().setPref(key, String(value)); } catch (e) {} }
 
+  var RP_UPS = [['fsr', 'FSR 1.0'], ['sharpen', 'Sharpen only'], ['off', 'Off']];
+  var RP_SHARP = [['off', 'Off'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']];
+  var RP_SMOOTH = [['lowest', 'Lowest delay'], ['slight', 'Slight delay (smooth)'], ['smooth', 'Smoother'], ['extra', 'Smoothest'], ['auto', 'Website default']];
+  var RP_COLOR = [['off', 'Off'], ['light', 'Light'], ['vivid', 'Vivid']];
   function remoteItems() {
     return [
       { label: 'Clarity boost', detail: clarityName(C.clarityPreset || 'off'), go: function () { render('clarity'); } },
@@ -1160,10 +1350,25 @@
       { label: 'Stream stats', detail: C.showStats ? 'On' : 'Off', go: function () {
         C.showStats = !C.showStats; savePref('show_stats', C.showStats); render('remote', focusIdx);
       } },
-      { label: 'Sharpening', sub: 'Crisper picture, done on the graphics chip',
-        detail: nameOf([['off', 'Off'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], C.rpSharpen || 'medium'), go: function () {
-        var n = nextOf([['off', 'Off'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], C.rpSharpen || 'medium');
+      { label: 'Upscaler', sub: 'FSR 1.0 upscales to your screen\u2019s full resolution',
+        detail: nameOf(RP_UPS, C.rpUpscaler || 'fsr'), go: function () {
+        var n = nextOf(RP_UPS, C.rpUpscaler || 'fsr');
+        C.rpUpscaler = n[0]; savePref('rp_upscaler', n[0]); applyVideoStyle(); render('remote', focusIdx);
+      } },
+      { label: 'Sharpness', sub: 'AMD RCAS sharpening, changes instantly',
+        detail: nameOf(RP_SHARP, C.rpSharpen || 'medium'), go: function () {
+        var n = nextOf(RP_SHARP, C.rpSharpen || 'medium');
         C.rpSharpen = n[0]; savePref('rp_sharpen', n[0]); applyVideoStyle(); render('remote', focusIdx);
+      } },
+      { label: 'Smoothness', sub: 'A small buffer keeps motion even on busy networks',
+        detail: nameOf(RP_SMOOTH, C.rpBuffer || 'slight'), go: function () {
+        var n = nextOf(RP_SMOOTH, C.rpBuffer || 'slight');
+        C.rpBuffer = n[0]; savePref('rp_buffer', n[0]); applyVideoStyle(); render('remote', focusIdx);
+      } },
+      { label: 'Color boost', sub: 'Richer colour, changes instantly',
+        detail: nameOf(RP_COLOR, C.rpColor || 'off'), go: function () {
+        var n = nextOf(RP_COLOR, C.rpColor || 'off');
+        C.rpColor = n[0]; savePref('rp_color', n[0]); applyVideoStyle(); render('remote', focusIdx);
       } },
       { label: 'Resolution', sub: 'Applies next time you connect', detail: nameOf(RP_RES, C.rpResolution || 'auto'), go: function () {
         var n = nextOf(RP_RES, C.rpResolution || 'auto');
@@ -1366,8 +1571,10 @@
       toggle('Faster page loading', 'fast_art', 'fastArt'),
       { header: 'Remote Play' },
       choice('Connection', 'remote_play_mode', 'remotePlayMode', [['auto', 'Auto (fastest)'], ['standard', 'Standard']], { sub: NEXT, reconnect: true }),
-      choice('Sharpening', 'rp_sharpen', 'rpSharpen', [['medium', 'Medium'], ['high', 'High'], ['low', 'Low'], ['off', 'Off']],
-        { sub: 'Graphics-chip sharpening for a crisper picture than the website', live: function () { applyVideoStyle(); } }),
+      choice('Upscaler', 'rp_upscaler', 'rpUpscaler', RP_UPS, { sub: 'FSR 1.0 upscales to your screen\u2019s full resolution', live: function () { applyVideoStyle(); } }),
+      choice('Sharpness', 'rp_sharpen', 'rpSharpen', RP_SHARP, { sub: 'AMD RCAS sharpening, changes instantly', live: function () { applyVideoStyle(); } }),
+      choice('Smoothness', 'rp_buffer', 'rpBuffer', RP_SMOOTH, { sub: 'A small buffer keeps motion even, changes instantly' }),
+      choice('Color boost', 'rp_color', 'rpColor', RP_COLOR, { live: function () { applyVideoStyle(); } }),
       choice('Resolution', 'rp_resolution', 'rpResolution', [['auto', 'Auto (1080p HQ)'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']], { sub: NEXT, reconnect: true })
     ];
   }
@@ -1836,6 +2043,7 @@
   // shows up as blocky glitches. The stream's own adaptive buffer is the smooth choice.
   if (true) {
     setInterval(async function () {
+      if (PURE_RP) return; // Remote Play has its own Smoothness setting
       if (C.lowLatency !== true) { // switched off: give receivers back their normal buffer once
         pcs.forEach(function (pc) {
           try { pc.getReceivers().forEach(function (r) { if ('jitterBufferTarget' in r && r.jitterBufferTarget === 0) r.jitterBufferTarget = null; }); } catch (e) {}
@@ -1862,6 +2070,23 @@
       }
     }, 1000);
   }
+
+  // Remote Play smoothness: a small playout buffer on video and audio absorbs network
+  // jitter so motion stays even. Changes apply live.
+  var RP_BUF = { lowest: 0, slight: 30, smooth: 60, extra: 100, auto: null };
+  if (PURE_RP) setInterval(function () {
+    var key = C.rpBuffer || 'slight';
+    var want = key in RP_BUF ? RP_BUF[key] : 30;
+    pcs.forEach(function (pc) {
+      if (pc.connectionState === 'closed') return;
+      try {
+        pc.getReceivers().forEach(function (r) {
+          if ('jitterBufferTarget' in r) { if (r.jitterBufferTarget !== want) r.jitterBufferTarget = want; }
+          else if ('playoutDelayHint' in r) { var s2 = want == null ? null : want / 1000; if (r.playoutDelayHint !== s2) r.playoutDelayHint = s2; }
+        });
+      } catch (e) {}
+    });
+  }, 1000);
 
   // Which route the stream is using: home network (direct), internet (direct) or relay.
   function isPrivateIp(a) {

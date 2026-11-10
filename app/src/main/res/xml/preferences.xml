@@ -92,6 +92,38 @@
 
     <PreferenceCategory app:title="Remote Play" app:iconSpaceReserved="false">
         <ListPreference
+            app:key="rp_upscaler"
+            app:title="Upscaler"
+            app:entries="@array/rp_ups_entries"
+            app:entryValues="@array/rp_ups_values"
+            app:defaultValue="fsr"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+        <ListPreference
+            app:key="rp_sharpen"
+            app:title="Sharpness"
+            app:entries="@array/rp_sharp_entries"
+            app:entryValues="@array/rp_sharp_values"
+            app:defaultValue="medium"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+        <ListPreference
+            app:key="rp_buffer"
+            app:title="Smoothness"
+            app:entries="@array/rp_buf_entries"
+            app:entryValues="@array/rp_buf_values"
+            app:defaultValue="slight"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+        <ListPreference
+            app:key="rp_color"
+            app:title="Color boost"
+            app:entries="@array/rp_col_entries"
+            app:entryValues="@array/rp_col_values"
+            app:defaultValue="off"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+        <ListPreference
             app:key="rp_resolution"
             app:title="Resolution"
             app:entries="@array/rp_res_entries"

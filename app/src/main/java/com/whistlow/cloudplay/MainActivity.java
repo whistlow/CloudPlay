@@ -380,6 +380,9 @@ public class MainActivity extends AppCompatActivity {
             o.put("fastArt", p.getBoolean("fast_art", true));
             o.put("rpResolution", p.getString("rp_resolution", "auto"));
             o.put("rpSharpen", p.getString("rp_sharpen", "medium"));
+            o.put("rpUpscaler", p.getString("rp_upscaler", "fsr"));
+            o.put("rpBuffer", p.getString("rp_buffer", "slight"));
+            o.put("rpColor", p.getString("rp_color", "off"));
             o.put("keepAlive", p.getBoolean("keep_alive", true));
             o.put("volume", p.getInt("volume", 100));
             o.put("latencyMode", p.getString("latency_mode", "balanced"));
