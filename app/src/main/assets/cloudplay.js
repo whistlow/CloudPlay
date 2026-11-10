@@ -391,7 +391,7 @@
   // sends a lower-quality stream. Standard mode only sends it when picked explicitly.
   var RP_STREAM_RES = OS_NAMES[C.rpResolution] ? C.rpResolution
     : RP_MODE === 'standard' ? null
-    : (OS_NAMES[C.resolution] ? C.resolution : '1080p');
+    : '1080p'; // your own console: always ask for full HD (not the cloud setting, which "Lowest latency" drops to 720p)
   if (PURE_RP && (RP_MODE === 'auto' || RP_STREAM_RES)) window.fetch = async function (input, init) {
     var url = typeof input === 'string' ? input : (input && input.url) || String(input);
     if (!isXhome(url)) return origFetch.call(this, input, init);
@@ -490,8 +490,8 @@
     return pcs.some(function (p) { return p.connectionState === 'connected'; });
   }
 
-  function applyCodec(pc) {
-    var want = H264_PROFILES[C.codec];
+  function applyCodec(pc, codec) {
+    var want = H264_PROFILES[codec || C.codec];
     if (!want || !window.RTCRtpReceiver || !RTCRtpReceiver.getCapabilities) return;
     var caps = RTCRtpReceiver.getCapabilities('video');
     if (!caps) return;
@@ -527,6 +527,11 @@
     PC.prototype.createOffer = async function () {
       if (pcs.indexOf(this) < 0) pcs.push(this); // used to know when a stream is live
       if (!bxOn() && ACTIVE) { try { applyCodec(this); } catch (e) {} }
+      // Remote Play: prefer H.264 High profile (sharper at the same bitrate). Only a preference
+      // order; if the console doesn't offer it, the stream uses what it does.
+      else if (PURE_RP && RP_MODE === 'auto') {
+        try { applyCodec(this, C.codec && C.codec !== 'auto' ? C.codec : 'h264_high'); } catch (e) {}
+      }
       var offer = await origCreateOffer.apply(this, arguments);
       if (!bxOn() && ACTIVE) {
         try {
@@ -544,7 +549,7 @@
     var oldSvg = document.getElementById('cp-svg'); if (oldSvg) oldSvg.remove();
 
     var filters = [];
-    var lvl = bxOn() ? 0 : (parseInt(C.sharpness, 10) || 0);
+    var lvl = (bxOn() || PURE_RP) ? 0 : (parseInt(C.sharpness, 10) || 0);
     if (lvl > 0) {
       var f;
       if (C.clarityAlgo === 'unsharp') {
@@ -902,7 +907,7 @@
   // Remote Play settings: picture options apply instantly (display only); resolution and
   // connection apply the next time you connect to your console.
   var FITS = [['contain', 'Fit'], ['cover', 'Zoom to fill'], ['fill', 'Stretch']];
-  var RP_RES = [['auto', 'Same as stream'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']];
+  var RP_RES = [['auto', 'Auto (1080p)'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']];
   function nextOf(list, cur) {
     var i = list.findIndex(function (x) { return x[0] === cur; });
     return list[(i + 1) % list.length];
@@ -1099,7 +1104,7 @@
       toggle('Faster page loading', 'fast_art', 'fastArt'),
       { header: 'Remote Play' },
       choice('Connection', 'remote_play_mode', 'remotePlayMode', [['auto', 'Auto (fastest)'], ['standard', 'Standard']], { sub: NEXT, reconnect: true }),
-      choice('Resolution', 'rp_resolution', 'rpResolution', [['auto', 'Same as stream'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']], { sub: NEXT, reconnect: true })
+      choice('Resolution', 'rp_resolution', 'rpResolution', [['auto', 'Auto (1080p)'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']], { sub: NEXT, reconnect: true })
     ];
   }
 
