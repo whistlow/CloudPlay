@@ -996,6 +996,7 @@
       var n = opts[(idx + d + opts.length) % opts.length];
       C[cfgKey] = n[0]; savePref(key, n[0], opt.type || 's');
       if (opt.live) opt.live(n[0]);
+      if (opt.reconnect) needReconnect();
     } };
   }
   function stepper(label, key, cfgKey, min, max, step, suffix, opt) {
@@ -1021,14 +1022,22 @@
     (C.regions || []).forEach(function (r) { list.push([r, r]); });
     return list;
   }
-  var NEXT = 'Applies when the next game starts';
+  // Stream settings (resolution, codec, bitrate, server) are fixed when a stream starts. Changed
+  // mid-game, the stream reconnects as soon as the panel closes, so they apply right away.
+  var pendingReconnect = false;
+  function nextText() {
+    return lastStreaming ? 'Applies right away (the stream reconnects for a moment)' : 'Applies when the next game starts';
+  }
+  function needReconnect() { if (lastStreaming) pendingReconnect = true; }
   function livePicture() { C.clarityPreset = 'custom'; savePref('clarity_preset', 'custom', 's'); applyVideoStyle(); }
 
   function advancedItems() {
+    var NEXT = nextText();
     return [
       { header: 'Latency' },
       choice('Latency', 'latency_mode', 'latencyMode', [['balanced', 'Balanced'], ['lowest', 'Lowest']], {
-        sub: 'Lowest: 720p and no video buffer for the quickest response. Applies when the next game starts.',
+        sub: 'Lowest: 720p and no video buffer for the quickest response',
+        reconnect: true,
         live: function (v) {
           var low = v === 'lowest';
           C.resolution = low ? '720p' : '1080p'; savePref('resolution', C.resolution, 's');
@@ -1036,10 +1045,10 @@
         }
       }),
       { header: 'Stream' },
-      choice('Resolution', 'resolution', 'resolution', [['auto', 'Auto'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']], { sub: NEXT }),
-      choice('Video codec', 'codec', 'codec', [['auto', 'Auto'], ['h264_high', 'H.264 High'], ['h264_main', 'H.264 Main'], ['h264_baseline', 'H.264 Baseline']], { sub: NEXT }),
-      choice('Max bitrate', 'max_bitrate', 'maxBitrate', [[0, 'Unlimited'], [40000, '40 Mbps'], [30000, '30 Mbps'], [20000, '20 Mbps'], [15000, '15 Mbps'], [10000, '10 Mbps'], [8000, '8 Mbps'], [5000, '5 Mbps'], [3000, '3 Mbps']], { sub: NEXT }),
-      choice('Server region', 'region', 'region', regionOpts(), { sub: NEXT }),
+      choice('Resolution', 'resolution', 'resolution', [['auto', 'Auto'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']], { sub: NEXT, reconnect: true }),
+      choice('Video codec', 'codec', 'codec', [['auto', 'Auto'], ['h264_high', 'H.264 High'], ['h264_main', 'H.264 Main'], ['h264_baseline', 'H.264 Baseline']], { sub: NEXT, reconnect: true }),
+      choice('Max bitrate', 'max_bitrate', 'maxBitrate', [[0, 'Unlimited'], [40000, '40 Mbps'], [30000, '30 Mbps'], [20000, '20 Mbps'], [15000, '15 Mbps'], [10000, '10 Mbps'], [8000, '8 Mbps'], [5000, '5 Mbps'], [3000, '3 Mbps']], { sub: NEXT, reconnect: true }),
+      choice('Server region', 'region', 'region', regionOpts(), { sub: NEXT, reconnect: true }),
       { header: 'Picture (changes instantly)' },
       choice('Screen fit', 'video_fit', 'videoFit', [['contain', 'Fit'], ['cover', 'Zoom to fill'], ['fill', 'Stretch']], { live: function () { applyVideoStyle(); } }),
       stepper('Sharpness', 'sharpness', 'sharpness', 0, 10, 1, '', { fmt: function (v) { return v ? String(v) : 'Off'; }, live: livePicture }),
@@ -1067,8 +1076,8 @@
       toggle('Sound in background', 'bg_audio', 'bgAudio'),
       toggle('Faster page loading', 'fast_art', 'fastArt'),
       { header: 'Remote Play' },
-      choice('Connection', 'remote_play_mode', 'remotePlayMode', [['auto', 'Auto (fastest)'], ['standard', 'Standard']], { sub: 'Applies next time you connect' }),
-      choice('Resolution', 'rp_resolution', 'rpResolution', [['auto', 'Auto'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']], { sub: 'Applies next time you connect' })
+      choice('Connection', 'remote_play_mode', 'remotePlayMode', [['auto', 'Auto (fastest)'], ['standard', 'Standard']], { sub: NEXT, reconnect: true }),
+      choice('Resolution', 'rp_resolution', 'rpResolution', [['auto', 'Auto'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']], { sub: NEXT, reconnect: true })
     ];
   }
 
@@ -1275,6 +1284,11 @@
 
   function close() {
     if (!menuEl) return;
+    if (pendingReconnect) {
+      pendingReconnect = false;
+      toast('Applying your settings\u2026');
+      setTimeout(function () { location.reload(); }, 450); // gives the app time to save them
+    }
     clearInterval(padTimer); padTimer = null;
     window.removeEventListener('keydown', onKey, true);
     menuEl.remove(); menuEl = null; rows = [];
@@ -1492,8 +1506,14 @@
   // Ask WebRTC for the smallest playout buffer: lower input-to-photon delay.
   // Off by default: a zero buffer leaves no time for lost video packets to be re-sent, which
   // shows up as blocky glitches. The stream's own adaptive buffer is the smooth choice.
-  if (C.lowLatency === true) {
+  if (true) {
     setInterval(async function () {
+      if (C.lowLatency !== true) { // switched off: give receivers back their normal buffer once
+        pcs.forEach(function (pc) {
+          try { pc.getReceivers().forEach(function (r) { if ('jitterBufferTarget' in r && r.jitterBufferTarget === 0) r.jitterBufferTarget = null; }); } catch (e) {}
+        });
+        return;
+      }
       // Remote Play: smallest buffer only on a direct home-network route; over the internet
       // the normal buffer keeps it smooth.
       var rp = location.pathname.indexOf('/play/consoles') >= 0;
