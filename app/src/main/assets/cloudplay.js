@@ -1382,13 +1382,83 @@
   // (the bar folds up, and Xbox changes its design), so settings are always one tap away.
   var floatGear = null;
   function gearVisibleInHud() {
-    var hud = findHud();
-    if (!hud) return false;
-    var g = hud.querySelector('.cp-hud-gear button, button[title="Settings"]');
-    if (!g) return false;
-    var r = g.getBoundingClientRect();
-    return r.width > 4 && r.height > 4 && r.top >= 0 && r.left >= 0;
+    var gs = document.querySelectorAll('.cp-hud-gear, .cp-bar-gear, #StreamHud button[title="Settings"]');
+    for (var i = 0; i < gs.length; i++) {
+      var r = gs[i].getBoundingClientRect();
+      if (r.width > 4 && r.height > 4 && r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight) return true;
+    }
+    return false;
   }
+
+  // Xbox's newer in-game bar (Xbox logo + dots) isn't the old "StreamHud", so find it by
+  // shape: a small fixed group of icon-only buttons. The gear is cloned from the bar's own
+  // button so it looks native, and placed just before the dots.
+  function isOurs(el) { return !!el.closest('.cp-float-gear, .cpm-backdrop, .cp-touch, .cp-bar-gear, .cp-hud-gear, header, [role="banner"]'); }
+  function iconButtons() {
+    var out = [];
+    document.querySelectorAll('button').forEach(function (b) {
+      if (isOurs(b) || !b.querySelector('svg') || b.querySelector('img')) return;
+      if ((b.textContent || '').trim().length > 2) return;
+      var r = b.getBoundingClientRect();
+      if (r.width < 16 || r.width > 96 || r.height < 16 || r.height > 96) return;
+      out.push(b);
+    });
+    return out;
+  }
+  function inFixedLayer(el) {
+    for (var n = el; n && n !== document.body; n = n.parentElement) {
+      var pos = getComputedStyle(n).position;
+      if (pos === 'fixed' || pos === 'absolute') return true;
+    }
+    return false;
+  }
+  function findStreamBar() {
+    var btns = iconButtons(), best = null;
+    btns.forEach(function (b) {
+      // smallest ancestor (up to 4 levels) that holds 2-6 of these buttons
+      var n = b.parentElement;
+      for (var depth = 0; n && depth < 4; depth++, n = n.parentElement) {
+        var inside = btns.filter(function (x) { return n.contains(x); });
+        if (inside.length >= 2) {
+          if (inside.length <= 6) {
+            var r = n.getBoundingClientRect();
+            var area = r.width * r.height;
+            if (r.width < innerWidth * 0.6 && inFixedLayer(n) && (!best || area < best.area)) {
+              best = { row: n, area: area, buttons: inside };
+            }
+          }
+          break;
+        }
+      }
+    });
+    return best;
+  }
+  function ensureBarGear() {
+    var existing = document.querySelector('.cp-bar-gear');
+    if (existing && existing.isConnected && existing.getBoundingClientRect().width > 0) return;
+    if (existing) existing.remove();
+    if (findHud() && document.querySelector('.cp-hud-gear')) return; // classic bar already has one
+    var bar = findStreamBar();
+    if (!bar) return;
+    var row = bar.row;
+    // the direct child of the row that holds each button ("unit": button or its wrapper)
+    var units = bar.buttons.map(function (b) {
+      var u = b; while (u.parentElement && u.parentElement !== row) u = u.parentElement;
+      return u;
+    });
+    var first = units[0], last = units[units.length - 1];
+    var g = cleanClone(first);
+    g.classList.add('cp-bar-gear');
+    var btn = g.tagName === 'BUTTON' ? g : (g.querySelector('button') || g);
+    btn.setAttribute('aria-label', 'Settings');
+    btn.setAttribute('title', 'Settings');
+    var svg = g.querySelector('svg'); if (svg) svg.style.fill = 'none';
+    g.addEventListener('click', function (e) {
+      e.preventDefault(); e.stopPropagation(); window.__cpMenu.open();
+    }, true);
+    row.insertBefore(g, last);
+  }
+  onReady(function () { setInterval(function () { if (lastStreaming) ensureBarGear(); }, 700); });
   function ensureFloatGear() {
     var show = !!lastStreaming && !menuOpen && !gearVisibleInHud();
     if (!floatGear && show) {
