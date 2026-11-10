@@ -122,6 +122,21 @@
         localStorage.setItem('cp.stockUi.v1', '1');
       }
     } catch (e) {}
+    // One-time: no engine touch overlay (the app has its own, shown only without a controller)
+    // and no auto stats bar (Stream stats in Advanced settings controls one overlay).
+    try {
+      if (!localStorage.getItem('cp.stockUi.v2')) {
+        var g2 = JSON.parse(localStorage.getItem('BetterXcloud') || '{}');
+        g2['touchController.mode'] = 'off';
+        localStorage.setItem('BetterXcloud', JSON.stringify(g2));
+        var s2 = JSON.parse(localStorage.getItem('BetterXcloud.Stream') || '{}');
+        s2['stats.showWhenPlaying'] = false;
+        s2['stats.quickGlance.enabled'] = false;
+        localStorage.setItem('BetterXcloud.Stream', JSON.stringify(s2));
+        localStorage.setItem('cp.stockUi.v2', '1');
+      }
+    } catch (e) {}
+
     // Quality settings from App settings: copied over whenever they change there, so the
     // in-page Settings and App settings stay in step (the most recent change wins).
     try {
@@ -190,7 +205,8 @@
         '.bx-settings-row{background:rgba(255,255,255,.06)!important;border-bottom:1px solid rgba(255,255,255,.07)!important}' +
         '.bx-settings-row:hover,.bx-settings-row:focus-within{background:rgba(196,200,255,.24)!important}' +
         '.bx-settings-tab-contents h2{background:transparent!important}' +
-        '.bx-settings-dialog a{color:#c4c8ff!important}';
+        '.bx-settings-dialog a{color:#c4c8ff!important}' +
+        '#StreamHud button[title="Stream stats"],#StreamHud div:has(> button[title="Stream stats"]){display:none!important}';
       document.head.appendChild(g);
     });
 
@@ -1466,7 +1482,30 @@
     });
     return best;
   }
+  // Taps on the engine's own in-game gear open the same purple panel (its settings are
+  // listed there), so every gear leads to one place.
+  window.addEventListener('click', function (e) {
+    if (!e.isTrusted) return;
+    var t = e.target && e.target.closest && e.target.closest('button[title="Settings"]');
+    if (!t || t.classList.contains('cp-hud-btn') || t.closest('.cp-bar-gear, .bx-settings-dialog, .cpm-backdrop')) return;
+    if (!t.closest('#StreamHud, [class*="StreamHud"], [class*="HUD"]')) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    window.__cpMenu.open();
+  }, true);
+
+  function engineGearShowing() {
+    var gs = document.querySelectorAll('button[title="Settings"]:not(.cp-hud-btn)');
+    for (var i = 0; i < gs.length; i++) {
+      if (!gs[i].closest('.cp-bar-gear, .bx-settings-dialog, .cpm-backdrop') && reallyVisible(gs[i])) return true;
+    }
+    return false;
+  }
+
   function ensureBarGear() {
+    if (engineGearShowing()) { // one gear is enough
+      document.querySelectorAll('.cp-bar-gear').forEach(function (g) { g.remove(); });
+      return;
+    }
     if (menuOpen) return;
     var gears = document.querySelectorAll('.cp-bar-gear');
     for (var i = 0; i < gears.length; i++) if (reallyVisible(gears[i])) return; // one is showing
@@ -1856,7 +1895,7 @@
     var el = null, prev = {};
     setInterval(async function () {
       var pc = pcs.filter(function (p) { return p.connectionState === 'connected'; }).pop();
-      if (!pc || !C.showStats || bxOn()) { if (el) el.style.display = 'none'; prev = {}; return; }
+      if (!pc || !C.showStats) { if (el) el.style.display = 'none'; prev = {}; return; }
       if (!el) {
         el = document.createElement('div');
         el.style.cssText = 'position:fixed;top:6px;left:6px;z-index:2147483647;background:rgba(0,0,0,.6);' +
