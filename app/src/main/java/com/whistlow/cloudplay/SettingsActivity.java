@@ -20,9 +20,9 @@ import java.util.Set;
 
 public class SettingsActivity extends AppCompatActivity {
 
-    @Override
     static final int CONTAINER_ID = 0x7f0c0f01;
 
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         float d = getResources().getDisplayMetrics().density;
