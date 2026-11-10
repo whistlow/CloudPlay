@@ -21,12 +21,67 @@ import java.util.Set;
 public class SettingsActivity extends AppCompatActivity {
 
     @Override
+    static final int CONTAINER_ID = 0x7f0c0f01;
+
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        if (getSupportActionBar() != null) getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+        float d = getResources().getDisplayMetrics().density;
+
+        // Blur whatever is behind (the Xbox page) where the device supports it: liquid glass.
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND);
+            android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.setBlurBehindRadius(Math.round(40 * d));
+            getWindow().setAttributes(lp);
+        }
+
+        android.widget.FrameLayout root = new android.widget.FrameLayout(this);
+        root.setBackgroundColor(0x59000000);
+        root.setOnClickListener(v -> finish());
+
+        android.widget.LinearLayout panel = new android.widget.LinearLayout(this);
+        panel.setOrientation(android.widget.LinearLayout.VERTICAL);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                new int[]{0xD9393C5C, 0xCC2C2E48});
+        bg.setCornerRadius(18 * d);
+        bg.setStroke(Math.round(d), 0x33FFFFFF);
+        panel.setBackground(bg);
+        panel.setClickable(true); // don't close when tapping inside
+        panel.setElevation(24 * d);
+        panel.setPadding(Math.round(28 * d), Math.round(20 * d), Math.round(28 * d), Math.round(6 * d));
+
+        android.widget.LinearLayout head = new android.widget.LinearLayout(this);
+        head.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        android.widget.TextView title = new android.widget.TextView(this);
+        title.setText("Settings");
+        title.setTextColor(0xFFFFFFFF);
+        title.setTextSize(22);
+        title.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+        head.addView(title, new android.widget.LinearLayout.LayoutParams(0, -2, 1f));
+        android.widget.TextView close = new android.widget.TextView(this);
+        close.setText("\u2715");
+        close.setTextColor(0xFFFFFFFF);
+        close.setTextSize(20);
+        close.setGravity(android.view.Gravity.CENTER);
+        close.setOnClickListener(v -> finish());
+        head.addView(close, new android.widget.LinearLayout.LayoutParams(Math.round(44 * d), Math.round(44 * d)));
+        panel.addView(head);
+
+        android.widget.FrameLayout container = new android.widget.FrameLayout(this);
+        container.setId(CONTAINER_ID);
+        panel.addView(container, new android.widget.LinearLayout.LayoutParams(-1, 0, 1f));
+
+        android.util.DisplayMetrics m = getResources().getDisplayMetrics();
+        android.widget.FrameLayout.LayoutParams plp = new android.widget.FrameLayout.LayoutParams(
+                Math.min(m.widthPixels - Math.round(32 * d), Math.round(1100 * d)),
+                m.heightPixels - Math.round(40 * d), android.view.Gravity.CENTER);
+        root.addView(panel, plp);
+        setContentView(root);
+
         if (savedInstanceState == null) {
             getSupportFragmentManager().beginTransaction()
-                    .replace(android.R.id.content, new SettingsFragment())
+                    .replace(CONTAINER_ID, new SettingsFragment())
                     .commit();
         }
     }
@@ -56,8 +111,8 @@ public class SettingsActivity extends AppCompatActivity {
         private final float radius, gap;
 
         CardDecoration(float density) {
-            paint.setColor(0xFF1C1C1C);
-            stroke.setColor(0x14FFFFFF);
+            paint.setColor(0x14FFFFFF);
+            stroke.setColor(0x1FFFFFFF);
             stroke.setStyle(android.graphics.Paint.Style.STROKE);
             stroke.setStrokeWidth(density);
             radius = 14 * density;
@@ -117,7 +172,7 @@ public class SettingsActivity extends AppCompatActivity {
             androidx.recyclerview.widget.RecyclerView list = getListView();
             float density = getResources().getDisplayMetrics().density;
             int width = getResources().getDisplayMetrics().widthPixels;
-            int column = Math.round(720 * density);
+            int column = Math.round(900 * density);
             int side = Math.max(Math.round(8 * density), (width - column) / 2);
             list.setPadding(side, Math.round(8 * density), side, Math.round(32 * density));
             list.setClipToPadding(false);
@@ -215,7 +270,7 @@ public class SettingsActivity extends AppCompatActivity {
                             sp.edit().clear().putStringSet(MainActivity.KEY_REGIONS, regions).commit();
                             PreferenceManager.setDefaultValues(ctx, R.xml.preferences, true);
                             getParentFragmentManager().beginTransaction()
-                                    .replace(android.R.id.content, new SettingsFragment())
+                                    .replace(CONTAINER_ID, new SettingsFragment())
                                     .commit();
                         })
                         .setNegativeButton("Cancel", null)
@@ -242,6 +297,34 @@ public class SettingsActivity extends AppCompatActivity {
                         .show();
                 return true;
             });
+
+            Preference crash = findPreference("last_crash_view");
+            if (crash != null) {
+                final String report = PreferenceManager.getDefaultSharedPreferences(requireContext())
+                        .getString("last_crash", null);
+                if (report != null) {
+                    crash.setSummary("Tap to view and copy (send it to whoever helps you fix it)");
+                    crash.setOnPreferenceClickListener(p -> {
+                        new AlertDialog.Builder(requireContext())
+                                .setTitle("Last crash report")
+                                .setMessage(report)
+                                .setPositiveButton("Copy", (d, w) -> {
+                                    android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                                            requireContext().getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+                                    if (cm != null) cm.setPrimaryClip(android.content.ClipData.newPlainText("crash", report));
+                                })
+                                .setNeutralButton("Clear", (d, w) -> {
+                                    PreferenceManager.getDefaultSharedPreferences(requireContext())
+                                            .edit().remove("last_crash").apply();
+                                    crash.setSummary("No crashes recorded");
+                                    crash.setOnPreferenceClickListener(null);
+                                })
+                                .setNegativeButton("Close", null)
+                                .show();
+                        return true;
+                    });
+                }
+            }
 
             Preference touchReset = findPreference("touch_reset");
             if (touchReset != null) touchReset.setOnPreferenceClickListener(p -> {

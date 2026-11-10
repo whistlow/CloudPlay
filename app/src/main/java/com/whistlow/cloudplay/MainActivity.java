@@ -83,6 +83,19 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        final Thread.UncaughtExceptionHandler prev = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler((t, ex) -> {
+            try {
+                java.io.StringWriter sw = new java.io.StringWriter();
+                ex.printStackTrace(new java.io.PrintWriter(sw));
+                String trace = sw.toString();
+                PreferenceManager.getDefaultSharedPreferences(getApplicationContext()).edit()
+                        .putString("last_crash", new java.util.Date() + "\n" + trace.substring(0, Math.min(4000, trace.length())))
+                        .commit();
+            } catch (Throwable ignored) {
+            }
+            if (prev != null) prev.uncaughtException(t, ex);
+        });
         PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
         // One-time: zero-buffer mode off (it caused blocky video glitches on busy Wi-Fi).
         if (!prefs().getBoolean("ll_off_v1", false)) {
@@ -731,22 +744,28 @@ public class MainActivity extends AppCompatActivity {
                 || (src & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK;
     }
 
-    // Controller state is pushed to the page as soon as it changes (coalesced to one update
-    // per message-loop turn), so the game's controller reads never block on the app.
+    // Controller state is pushed to the page when it changes: at most once per screen refresh
+    // and one update in flight at a time, so a busy stick can never flood the page or starve
+    // drawing (which froze the app). The game's controller reads never wait on the app.
     private int pushedPadVersion = -1;
-    private boolean padPushPending;
-    private final Runnable padPush = () -> {
+    private boolean padPushPending, padInFlight;
+    private final android.view.Choreographer.FrameCallback padPush = frameTime -> {
         padPushPending = false;
+        if (padInFlight || webView == null) return;
         int v = gamepads.version();
-        if (v == pushedPadVersion || webView == null) return;
+        if (v == pushedPadVersion) return;
         pushedPadVersion = v;
-        webView.evaluateJavascript("window.__cpPads&&__cpPads(" + v + "," + gamepads.state() + ")", null);
+        padInFlight = true;
+        webView.evaluateJavascript("window.__cpPads&&__cpPads(" + v + "," + gamepads.state() + ")", r -> {
+            padInFlight = false;
+            if (gamepads.version() != pushedPadVersion) pushPads();
+        });
     };
 
     private void pushPads() {
-        if (padPushPending || gamepads.version() == pushedPadVersion) return;
+        if (padPushPending || padInFlight || gamepads.version() == pushedPadVersion) return;
         padPushPending = true;
-        handler.postAtFrontOfQueue(padPush);
+        android.view.Choreographer.getInstance().postFrameCallback(padPush);
     }
 
     @Override

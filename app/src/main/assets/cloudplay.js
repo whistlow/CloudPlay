@@ -171,6 +171,24 @@
         localStorage.setItem('BetterXcloud', JSON.stringify(bxs));
       }
     } catch (e) {}
+    // Settings dialog in the same purple frosted-glass style as the app's panels.
+    onReady(function () {
+      var g = document.createElement('style');
+      g.textContent =
+        '.bx-settings-tab-contents{background:linear-gradient(135deg,rgba(58,61,94,.86),rgba(44,46,72,.82))!important;' +
+        '-webkit-backdrop-filter:blur(28px) saturate(150%);backdrop-filter:blur(28px) saturate(150%);' +
+        'box-shadow:0 24px 80px rgba(0,0,0,.45)!important;border-left:1px solid rgba(255,255,255,.14)}' +
+        '.bx-settings-tabs svg{background:rgba(44,46,72,.86)!important;border-left-color:transparent!important;' +
+        '-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}' +
+        '.bx-settings-tabs svg.bx-active{background:rgba(196,200,255,.32)!important;border-left-color:#c4c8ff!important}' +
+        '.bx-settings-tabs svg:not(.bx-active):hover{background:rgba(196,200,255,.18)!important}' +
+        '.bx-settings-row{background:rgba(255,255,255,.06)!important;border-bottom:1px solid rgba(255,255,255,.07)!important}' +
+        '.bx-settings-row:hover,.bx-settings-row:focus-within{background:rgba(196,200,255,.24)!important}' +
+        '.bx-settings-tab-contents h2{background:transparent!important}' +
+        '.bx-settings-dialog a{color:#c4c8ff!important}';
+      document.head.appendChild(g);
+    });
+
     // Its own header buttons are replaced by the settings gear next to Search.
     onReady(function () {
       var st = document.createElement('style');
@@ -884,9 +902,14 @@
   // Gear in the in-game bar (next to the Xbox and controller buttons), cloned from the bar's
   // own button so it matches. Used wherever the enhancement engine isn't adding its own.
   function ensureHudGear() {
-    if (BX && window.__bxMainOk) return; // the engine adds its own gear
     var hud = document.getElementById('StreamHud');
-    if (!hud || hud.querySelector('.cp-hud-gear')) return;
+    if (!hud) return;
+    // The engine's own button (titled "Settings") may come and go as Xbox redraws the bar;
+    // whenever it's missing, ours is there instead, so a gear is always available.
+    var engineBtn = hud.querySelector('button[title="Settings"]:not(.cp-hud-btn)');
+    var mine = hud.querySelector('.cp-hud-gear');
+    if (engineBtn) { if (mine) mine.remove(); return; }
+    if (mine) return;
     var org = hud.querySelector('div[class^=HUDButton]');
     var btnOrg = org && org.querySelector('button');
     var svgOrg = btnOrg && btnOrg.querySelector('svg');
@@ -894,6 +917,7 @@
     var box = org.cloneNode(true);
     box.classList.add('cp-hud-gear');
     var b = box.querySelector('button');
+    b.classList.add('cp-hud-btn');
     b.setAttribute('title', 'Settings');
     b.setAttribute('aria-label', 'Settings');
     b.removeAttribute('id');
@@ -902,12 +926,23 @@
     g.style.fill = 'none';
     svg.parentNode.replaceChild(g, svg);
     b.addEventListener('click', function (e) {
-      e.preventDefault(); e.stopPropagation(); window.__cpMenu.open();
+      e.preventDefault(); e.stopPropagation();
+      if (PURE_RP) window.__cpMenu.open(); else openSettingsUi();
     }, true);
     var parent = org.parentElement;
     parent.insertBefore(box, parent.lastElementChild);
   }
-  onReady(function () { setInterval(function () { if (lastStreaming) ensureHudGear(); }, 700); });
+  onReady(function () {
+    setInterval(function () { if (lastStreaming) ensureHudGear(); }, 500);
+    // React to the bar being redrawn right away, not just on the timer.
+    var watched = null;
+    setInterval(function () {
+      var hud = document.getElementById('StreamHud');
+      if (!hud || hud === watched) return;
+      watched = hud;
+      new MutationObserver(function () { ensureHudGear(); }).observe(hud, { childList: true, subtree: true });
+    }, 1000);
+  });
 
   function mainItems() {
     var preset = (CLARITY.filter(function (c) { return c[0] === (C.clarityPreset || 'off'); })[0] || CLARITY[0])[1];

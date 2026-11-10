@@ -284,6 +284,11 @@
             app:summary="Removes cookies, cache, saved logins and advanced settings"
             app:iconSpaceReserved="false" />
         <Preference
+            app:key="last_crash_view"
+            app:title="Last crash report"
+            app:summary="No crashes recorded"
+            app:iconSpaceReserved="false" />
+        <Preference
             app:key="about"
             app:title="Made by whistlow"
             app:summary="github.com/whistlow"

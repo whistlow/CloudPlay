@@ -81,7 +81,8 @@ class MenuPanel {
         LinearLayout panel = new LinearLayout(act);
         panel.setOrientation(LinearLayout.VERTICAL);
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0xF2161616);
+        bg.setColors(new int[]{0xF23A3D5E, 0xF02C2E48});
+        bg.setOrientation(GradientDrawable.Orientation.TL_BR);
         float r = dp(18);
         bg.setCornerRadii(new float[]{r, r, 0, 0, 0, 0, r, r});
         panel.setBackground(bg);
@@ -187,7 +188,7 @@ class MenuPanel {
         if (it.detail != null) {
             TextView detail = new TextView(act);
             detail.setText(it.detail);
-            detail.setTextColor(0xFF16C60C);
+            detail.setTextColor(0xFFC4C8FF);
             detail.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
             row.addView(detail);
         }
@@ -206,7 +207,7 @@ class MenuPanel {
     private StateListDrawable rowBackground() {
         StateListDrawable s = new StateListDrawable();
         GradientDrawable focused = new GradientDrawable();
-        focused.setColor(0x26FFFFFF);
+        focused.setColor(0x4DC4C8FF);
         focused.setStroke(dp(2), Color.WHITE);
         focused.setCornerRadius(dp(10));
         GradientDrawable pressed = new GradientDrawable();

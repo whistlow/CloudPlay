@@ -45,7 +45,6 @@
             android:name=".SettingsActivity"
             android:exported="false"
             android:label="@string/settings_title"
-            android:screenOrientation="sensorLandscape"
             android:theme="@style/SettingsTheme" />
     </application>
 </manifest>
