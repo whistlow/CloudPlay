@@ -163,7 +163,7 @@
     </string-array>
 
     <string-array name="rp_res_entries">
-        <item>Auto (same as the Xbox website)</item>
+        <item>Same as stream resolution (1080p if Auto)</item>
         <item>720p</item>
         <item>1080p</item>
         <item>1080p HQ</item>

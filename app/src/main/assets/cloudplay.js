@@ -386,17 +386,23 @@
     return list.slice(0, end).concat(extra, list.slice(end));
   }
 
-  if (PURE_RP && (RP_MODE === 'auto' || OS_NAMES[C.rpResolution])) window.fetch = async function (input, init) {
+  // Remote Play resolution: its own setting if chosen; "Auto" follows the main stream
+  // resolution (1080p if that's Auto too). Without this Xbox sees an Android handheld and
+  // sends a lower-quality stream. Standard mode only sends it when picked explicitly.
+  var RP_STREAM_RES = OS_NAMES[C.rpResolution] ? C.rpResolution
+    : RP_MODE === 'standard' ? null
+    : (OS_NAMES[C.resolution] ? C.resolution : '1080p');
+  if (PURE_RP && (RP_MODE === 'auto' || RP_STREAM_RES)) window.fetch = async function (input, init) {
     var url = typeof input === 'string' ? input : (input && input.url) || String(input);
     if (!isXhome(url)) return origFetch.call(this, input, init);
     var path = url.split('?')[0];
     var method = ((init && init.method) || (typeof input !== 'string' && input && input.method) || 'GET').toUpperCase();
 
     var res;
-    if (OS_NAMES[C.rpResolution]) {
+    if (RP_STREAM_RES) {
       var req = new Request(input, init);
       var headers = new Headers(req.headers);
-      headers.set('x-ms-device-info', deviceInfo(C.rpResolution));
+      headers.set('x-ms-device-info', deviceInfo(RP_STREAM_RES));
       var opts = { method: req.method, headers: headers };
       if (req.method !== 'GET' && req.method !== 'HEAD') opts.body = await req.clone().text();
       res = await origFetch(new Request(req.url, opts));
@@ -896,7 +902,7 @@
   // Remote Play settings: picture options apply instantly (display only); resolution and
   // connection apply the next time you connect to your console.
   var FITS = [['contain', 'Fit'], ['cover', 'Zoom to fill'], ['fill', 'Stretch']];
-  var RP_RES = [['auto', 'Auto'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']];
+  var RP_RES = [['auto', 'Same as stream'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']];
   function nextOf(list, cur) {
     var i = list.findIndex(function (x) { return x[0] === cur; });
     return list[(i + 1) % list.length];
@@ -1093,7 +1099,7 @@
       toggle('Faster page loading', 'fast_art', 'fastArt'),
       { header: 'Remote Play' },
       choice('Connection', 'remote_play_mode', 'remotePlayMode', [['auto', 'Auto (fastest)'], ['standard', 'Standard']], { sub: NEXT, reconnect: true }),
-      choice('Resolution', 'rp_resolution', 'rpResolution', [['auto', 'Auto'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']], { sub: NEXT, reconnect: true })
+      choice('Resolution', 'rp_resolution', 'rpResolution', [['auto', 'Same as stream'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']], { sub: NEXT, reconnect: true })
     ];
   }
 
