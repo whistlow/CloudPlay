@@ -1079,6 +1079,9 @@
         for (var b = 0; b < 17; b++) {
           var srcB = swap ? ({ 0: 1, 1: 0, 2: 3, 3: 2 })[b] : undefined;
           var val = p.b[srcB != null ? srcB : b] || 0, btn = o.buttons[b];
+          // Xbox button: passed on only in a game (it opens the in-game menu). On the website
+          // pages it opened Xbox's Guide panel over the new layout, so it's ignored there.
+          if (b === 16 && !lastStreaming) val = 0;
           btn.value = val;
           btn.pressed = btn.touched = val > 0.12;
         }
