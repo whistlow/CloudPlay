@@ -1556,7 +1556,8 @@
     }
     if (floatGear) floatGear.style.display = show ? 'flex' : 'none';
   }
-  onReady(function () { setInterval(ensureFloatGear, 500); });
+  // The floating gear is off: settings live only in the in-game bar (open it with the dots).
+  // ensureFloatGear stays available but isn't scheduled.
 
   // ================================================================ latency
   // Ask WebRTC for the smallest playout buffer: lower input-to-photon delay.
