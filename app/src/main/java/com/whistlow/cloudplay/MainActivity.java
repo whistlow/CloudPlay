@@ -375,6 +375,16 @@ public class MainActivity extends AppCompatActivity {
             o.put("fastArt", p.getBoolean("fast_art", true));
             o.put("rpResolution", p.getString("rp_resolution", "auto"));
             o.put("keepAlive", p.getBoolean("keep_alive", true));
+            o.put("volume", p.getInt("volume", 100));
+            o.put("buttonLayout", p.getString("button_layout", "xbox"));
+            o.put("deadzone", p.getInt("deadzone", 5));
+            o.put("invertY", p.getBoolean("invert_y", false));
+            o.put("rumbleStrength", p.getInt("rumble_strength", 100));
+            JSONArray regions = new JSONArray();
+            java.util.List<String> rl = new java.util.ArrayList<>(p.getStringSet(KEY_REGIONS, Collections.emptySet()));
+            Collections.sort(rl);
+            for (String r : rl) regions.put(r);
+            o.put("regions", regions);
             o.put("bgAudio", p.getBoolean("bg_audio", false));
             o.put("startUrl", startUrl());
         } catch (JSONException ignored) {
@@ -498,6 +508,21 @@ public class MainActivity extends AppCompatActivity {
                 refreshScriptWithoutReload();
                 if (webView != null) webView.evaluateJavascript(
                         "window.__cpSetVideo && __cpSetVideo(" + videoConfig() + ")", null);
+            });
+        }
+
+        /** Save a setting from the in-page panel with its real type (s = text, i = number, b = on/off). */
+        @JavascriptInterface
+        public void setPrefTyped(String key, String value, String type) {
+            runOnUiThread(() -> {
+                SharedPreferences.Editor e = prefs().edit();
+                if ("b".equals(type)) e.putBoolean(key, "true".equals(value));
+                else if ("i".equals(type)) e.putInt(key, parseInt(value));
+                else e.putString(key, value);
+                e.apply();
+                if ("keep_alive".equals(key)) updateKeepAlive();
+                if (key.startsWith("rumble") || "wifi_low_latency".equals(key)) applyPerformance();
+                if (webView != null) refreshScriptWithoutReload();
             });
         }
 

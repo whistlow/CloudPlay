@@ -62,6 +62,9 @@
   var H264_PROFILES = { h264_high: '64', h264_main: '4d', h264_baseline: '42' };
 
   function native() { return window.CloudPlayNative; }
+  // Is the enhancement engine actually running (not just selected)? If it failed to start,
+  // the app's own engine takes over everything it would have handled.
+  function bxOn() { return BX && !!window.__bxMainOk; }
 
   // Background play: the page always believes it's on screen, so the game isn't paused or
   // ended when you switch apps. The app mutes it while you're away (unless sound is allowed).
@@ -75,9 +78,11 @@
       });
     } catch (e) {}
   }
-  var bgMuted = [];
+  var bgMuted = [], bgAway = false;
   window.__cpBackground = function (away) {
+    bgAway = away;
     if (C.bgAudio) return;
+    try { if (boost.ctx) { if (away) boost.ctx.suspend(); else boost.ctx.resume(); } } catch (e) {}
     if (away) {
       bgMuted = [];
       document.querySelectorAll('video, audio').forEach(function (m) {
@@ -414,13 +419,13 @@
     var path = url.split('?')[0];
 
     // With the Advanced engine, it handles requests itself; here we only read the server list.
-    if (BX && !/\/v2\/login\/user/.test(path)) return origFetch.call(this, input, init);
+    if (bxOn() && !/\/v2\/login\/user/.test(path)) return origFetch.call(this, input, init);
 
-    if (!BX && isXhome(url)) return DIRECT_RP ? handleXhome(input, init, url, path) : origFetch.call(this, input, init);
+    if (!bxOn() && isXhome(url)) return DIRECT_RP ? handleXhome(input, init, url, path) : origFetch.call(this, input, init);
 
     // Stream resolution for cloud games and Remote Play: the server picks quality
     // from the client's reported OS.
-    if (!BX && /\/sessions\/cloud\/play$/.test(path) && OS_NAMES[C.resolution]) {
+    if (!bxOn() && /\/sessions\/cloud\/play$/.test(path) && OS_NAMES[C.resolution]) {
       try {
         var raw = await readBody(input, init);
         if (raw) {
@@ -442,7 +447,7 @@
         var regions = j && j.offeringSettings && j.offeringSettings.regions;
         if (regions && regions.length) {
           try { native() && native().setRegions(JSON.stringify(regions.map(function (x) { return x.name; }))); } catch (e) {}
-          if (!BX && C.region && C.region !== 'auto' && regions.some(function (x) { return x.name === C.region; })) {
+          if (!bxOn() && C.region && C.region !== 'auto' && regions.some(function (x) { return x.name === C.region; })) {
             regions.forEach(function (x) { x.isDefault = x.name === C.region; });
             var h = new Headers(res.headers);
             h.delete('content-length');
@@ -499,9 +504,9 @@
     var origCreateOffer = PC.prototype.createOffer;
     PC.prototype.createOffer = async function () {
       if (pcs.indexOf(this) < 0) pcs.push(this); // used to know when a stream is live
-      if (!BX && ACTIVE) { try { applyCodec(this); } catch (e) {} }
+      if (!bxOn() && ACTIVE) { try { applyCodec(this); } catch (e) {} }
       var offer = await origCreateOffer.apply(this, arguments);
-      if (!BX && ACTIVE) {
+      if (!bxOn() && ACTIVE) {
         try {
           if (offer && offer.sdp) offer = { type: offer.type, sdp: limitBitrate(offer.sdp) };
         } catch (e) {}
@@ -517,7 +522,7 @@
     var oldSvg = document.getElementById('cp-svg'); if (oldSvg) oldSvg.remove();
 
     var filters = [];
-    var lvl = BX ? 0 : (parseInt(C.sharpness, 10) || 0);
+    var lvl = bxOn() ? 0 : (parseInt(C.sharpness, 10) || 0);
     if (lvl > 0) {
       var f;
       if (C.clarityAlgo === 'unsharp') {
@@ -536,13 +541,13 @@
       document.body.appendChild(holder.firstChild);
       filters.push('url(#cp-sharpen)');
     }
-    if (!BX && C.saturation && C.saturation !== 100) filters.push('saturate(' + C.saturation / 100 + ')');
-    if (!BX && C.contrast && C.contrast !== 100) filters.push('contrast(' + C.contrast / 100 + ')');
-    if (!BX && C.brightness && C.brightness !== 100) filters.push('brightness(' + C.brightness / 100 + ')');
+    if (!bxOn() && C.saturation && C.saturation !== 100) filters.push('saturate(' + C.saturation / 100 + ')');
+    if (!bxOn() && C.contrast && C.contrast !== 100) filters.push('contrast(' + C.contrast / 100 + ')');
+    if (!bxOn() && C.brightness && C.brightness !== 100) filters.push('brightness(' + C.brightness / 100 + ')');
 
     var style = document.createElement('style');
     style.id = 'cp-style';
-    style.textContent = 'video{' + (BX ? '' : 'object-fit:' + (C.videoFit || 'contain') + ' !important;') +
+    style.textContent = 'video{' + (bxOn() ? '' : 'object-fit:' + (C.videoFit || 'contain') + ' !important;') +
       (filters.length ? 'filter:' + filters.join(' ') + ' !important;' : '') + '}' +
       'html,body{overscroll-behavior:none;}';
     document.head.appendChild(style);
@@ -654,12 +659,21 @@
       if (o._t !== p.t) {
         o._t = p.t;
         o.timestamp = performance.now();
+        var swap = C.buttonLayout === 'nintendo';
         for (var b = 0; b < 17; b++) {
-          var val = p.b[b] || 0, btn = o.buttons[b];
+          var srcB = swap ? ({ 0: 1, 1: 0, 2: 3, 3: 2 })[b] : undefined;
+          var val = p.b[srcB != null ? srcB : b] || 0, btn = o.buttons[b];
           btn.value = val;
           btn.pressed = btn.touched = val > 0.12;
         }
-        for (var a = 0; a < 4; a++) o.axes[a] = p.a[a] || 0;
+        var dz = Math.max(0, Math.min(0.3, (C.deadzone != null ? +C.deadzone : 5) / 100));
+        for (var a = 0; a < 4; a++) {
+          var av = p.a[a] || 0;
+          var mag = Math.abs(av);
+          av = mag <= dz ? 0 : Math.sign(av) * (mag - dz) / (1 - dz); // rescaled radial-ish deadzone
+          if (a === 3 && C.invertY) av = -av;
+          o.axes[a] = av;
+        }
       }
       seen[p.i] = 1;
       if (isNew) announce('gamepadconnected', o);
@@ -901,8 +915,13 @@
 
   // Gear in the in-game bar (next to the Xbox and controller buttons), cloned from the bar's
   // own button so it matches. Used wherever the enhancement engine isn't adding its own.
+  function findHud() {
+    return document.getElementById('StreamHud') ||
+      document.querySelector('[id*="StreamHud" i], [class*="StreamHud" i], [data-testid*="stream-hud" i]');
+  }
+
   function ensureHudGear() {
-    var hud = document.getElementById('StreamHud');
+    var hud = findHud();
     if (!hud) return;
     // The engine's own button (titled "Settings") may come and go as Xbox redraws the bar;
     // whenever it's missing, ours is there instead, so a gear is always available.
@@ -910,7 +929,8 @@
     var mine = hud.querySelector('.cp-hud-gear');
     if (engineBtn) { if (mine) mine.remove(); return; }
     if (mine) return;
-    var org = hud.querySelector('div[class^=HUDButton]');
+    var org = hud.querySelector('div[class^=HUDButton], div[class*="HUDButton"]');
+    if (!org) { var anyBtn = hud.querySelector('button svg'); org = anyBtn && anyBtn.closest('button').parentElement; }
     var btnOrg = org && org.querySelector('button');
     var svgOrg = btnOrg && btnOrg.querySelector('svg');
     if (!svgOrg) return;
@@ -937,7 +957,7 @@
     // React to the bar being redrawn right away, not just on the timer.
     var watched = null;
     setInterval(function () {
-      var hud = document.getElementById('StreamHud');
+      var hud = findHud();
       if (!hud || hud === watched) return;
       watched = hud;
       new MutationObserver(function () { ensureHudGear(); }).observe(hud, { childList: true, subtree: true });
@@ -947,20 +967,100 @@
   function mainItems() {
     var preset = (CLARITY.filter(function (c) { return c[0] === (C.clarityPreset || 'off'); })[0] || CLARITY[0])[1];
     var items = [
-      { label: 'App settings', sub: 'Stream quality, controls, rumble, performance', go: function () { close(); native() && native().openSettings(); } }
+      { label: 'Advanced settings', sub: 'Stream quality, picture, audio, controller, touch', go: function () { render('advanced'); } },
+      { label: 'Clarity boost', detail: preset, go: function () { render('clarity'); } },
+      { label: 'Remote Play', sub: 'Play games installed on your Xbox console', go: function () { close(); location.href = remotePlayUrl(); } }
     ];
-    if (BX) items.push({ label: 'Advanced settings', sub: 'Upscaling, stats, server, mouse & keyboard', go: function () {
-      close(); setTimeout(function () { if (window.__cpOpenBx && __cpOpenBx() !== 'ok') toast('Settings are still loading, try again in a moment'); }, 60);
+    if (bxOn()) items.push({ label: 'Better xCloud settings', sub: 'Upscaling, mouse & keyboard and more', go: function () {
+      close(); setTimeout(function () { if (window.__cpOpenBx) __cpOpenBx(); }, 60);
     } });
     items.push(
-      { label: 'Remote Play', sub: 'Play games installed on your Xbox console', go: function () { close(); location.href = remotePlayUrl(); } },
-      { label: 'Clarity boost', detail: preset, go: function () { render('clarity'); } },
-      { label: 'Touch controls', sub: 'Show or hide on-screen buttons', go: function () { close(); window.__cpTouch && __cpTouch.toggle(); } },
       { label: 'Edit touch layout', go: function () { close(); window.__cpTouch && __cpTouch.edit(); } },
+      { label: 'App settings', sub: 'Everything else, in the full settings screen', go: function () { close(); native() && native().openSettings(); } },
       { label: 'Reload', go: function () { location.reload(); } },
       { label: 'Exit', go: function () { native() && native().exitApp(); } }
     );
     return items;
+  }
+
+  // ---- Advanced settings: every option implemented by the app itself, so it works whether
+  // or not the enhancement engine runs. Left/right (or tap) changes a value.
+  function savePref(key, value, type) {
+    try { native() && native().setPrefTyped(key, String(value), type || 's'); } catch (e) {}
+  }
+  function choice(label, key, cfgKey, opts, opt) {
+    opt = opt || {};
+    var cur = C[cfgKey] != null ? String(C[cfgKey]) : String(opts[0][0]);
+    var idx = Math.max(0, opts.findIndex(function (o) { return String(o[0]) === cur; }));
+    return { label: label, sub: opt.sub, detail: opts[idx][1], adjustable: true, adjust: function (d) {
+      var n = opts[(idx + d + opts.length) % opts.length];
+      C[cfgKey] = n[0]; savePref(key, n[0], opt.type || 's');
+      if (opt.live) opt.live(n[0]);
+    } };
+  }
+  function stepper(label, key, cfgKey, min, max, step, suffix, opt) {
+    opt = opt || {};
+    var cur = parseInt(C[cfgKey], 10); if (isNaN(cur)) cur = opt.def != null ? opt.def : min;
+    var shown = opt.fmt ? opt.fmt(cur) : cur + (suffix || '');
+    return { label: label, sub: opt.sub, detail: shown, adjustable: true, adjust: function (d) {
+      var v = Math.max(min, Math.min(max, cur + d * step));
+      C[cfgKey] = v; savePref(key, v, 'i');
+      if (opt.live) opt.live(v);
+    } };
+  }
+  function toggle(label, key, cfgKey, opt) {
+    opt = opt || {};
+    var on = !!C[cfgKey];
+    return { label: label, sub: opt.sub, detail: on ? 'On' : 'Off', adjustable: true, adjust: function () {
+      C[cfgKey] = !on; savePref(key, !on, 'b');
+      if (opt.live) opt.live(!on);
+    } };
+  }
+  function regionOpts() {
+    var list = [['auto', 'Auto (closest)']];
+    (C.regions || []).forEach(function (r) { list.push([r, r]); });
+    return list;
+  }
+  var NEXT = 'Applies when the next game starts';
+  function livePicture() { C.clarityPreset = 'custom'; savePref('clarity_preset', 'custom', 's'); applyVideoStyle(); }
+
+  function advancedItems() {
+    return [
+      { header: 'Stream' },
+      choice('Resolution', 'resolution', 'resolution', [['auto', 'Auto'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']], { sub: NEXT }),
+      choice('Video codec', 'codec', 'codec', [['auto', 'Auto'], ['h264_high', 'H.264 High'], ['h264_main', 'H.264 Main'], ['h264_baseline', 'H.264 Baseline']], { sub: NEXT }),
+      choice('Max bitrate', 'max_bitrate', 'maxBitrate', [[0, 'Unlimited'], [40000, '40 Mbps'], [30000, '30 Mbps'], [20000, '20 Mbps'], [15000, '15 Mbps'], [10000, '10 Mbps'], [8000, '8 Mbps'], [5000, '5 Mbps'], [3000, '3 Mbps']], { sub: NEXT }),
+      choice('Server region', 'region', 'region', regionOpts(), { sub: NEXT }),
+      { header: 'Picture (changes instantly)' },
+      choice('Screen fit', 'video_fit', 'videoFit', [['contain', 'Fit'], ['cover', 'Zoom to fill'], ['fill', 'Stretch']], { live: function () { applyVideoStyle(); } }),
+      stepper('Sharpness', 'sharpness', 'sharpness', 0, 10, 1, '', { fmt: function (v) { return v ? String(v) : 'Off'; }, live: livePicture }),
+      choice('Sharpen style', 'clarity_algo', 'clarityAlgo', [['sharpen', 'Crisp'], ['unsharp', 'Natural']], { live: livePicture }),
+      stepper('Saturation', 'saturation', 'saturation', 50, 150, 5, '%', { def: 100, live: livePicture }),
+      stepper('Contrast', 'contrast', 'contrast', 50, 150, 5, '%', { def: 100, live: livePicture }),
+      stepper('Brightness', 'brightness', 'brightness', 50, 150, 5, '%', { def: 100, live: livePicture }),
+      { header: 'Audio' },
+      stepper('Game volume', 'volume', 'volume', 50, 300, 25, '%', { def: 100, live: function () { applyVolume(); } }),
+      { header: 'Controller' },
+      choice('Button layout', 'button_layout', 'buttonLayout', [['xbox', 'Xbox'], ['nintendo', 'Swap A/B and X/Y']], { sub: 'For handhelds with Nintendo-style button labels' }),
+      stepper('Stick deadzone', 'deadzone', 'deadzone', 0, 30, 2, '%', { def: 5 }),
+      toggle('Invert right stick Y', 'invert_y', 'invertY'),
+      choice('Rumble', 'rumble', 'rumble', [['auto', 'Controller, else phone'], ['controller', 'Controller only'], ['phone', 'Phone only'], ['off', 'Off']], { sub: 'Applies after reload' }),
+      stepper('Rumble strength', 'rumble_strength', 'rumbleStrength', 10, 100, 10, '%', { def: 100 }),
+      { header: 'Touch controls' },
+      choice('On-screen buttons', 'touch_mode', 'touchMode', [['auto', 'When no controller'], ['always', 'Always'], ['off', 'Off']], { sub: 'Applies after reload' }),
+      stepper('Opacity', 'touch_opacity', 'touchOpacity', 10, 100, 10, '%', { def: 60 }),
+      stepper('Size', 'touch_size', 'touchSize', 50, 150, 10, '%', { def: 100 }),
+      { label: 'Edit touch layout', go: function () { close(); window.__cpTouch && __cpTouch.edit(); } },
+      { header: 'Overlay & performance' },
+      toggle('Stream stats', 'show_stats', 'showStats'),
+      toggle('Zero-buffer mode', 'low_latency', 'lowLatency', { sub: 'Quicker response, but glitches if packets drop' }),
+      toggle('Keep running in background', 'keep_alive', 'keepAlive'),
+      toggle('Sound in background', 'bg_audio', 'bgAudio'),
+      toggle('Faster page loading', 'fast_art', 'fastArt'),
+      { header: 'Remote Play' },
+      choice('Connection', 'remote_play_mode', 'remotePlayMode', [['auto', 'Auto (fastest)'], ['standard', 'Standard']], { sub: 'Applies next time you connect' }),
+      choice('Resolution', 'rp_resolution', 'rpResolution', [['auto', 'Auto'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']], { sub: 'Applies next time you connect' })
+    ];
   }
 
   function clarityItems() {
@@ -968,7 +1068,7 @@
       return { label: c[1], check: (C.clarityPreset || 'off') === c[0], go: function () {
         C.clarityPreset = c[0];
         try { native() && native().setClarity(c[0]); } catch (e) {}
-        if (BX) toast('Clarity boost applies when the next game starts');
+        if (bxOn()) toast('Clarity boost applies when the next game starts');
         render('clarity', focusIdx);
       } };
     });
@@ -998,6 +1098,12 @@
       '.cpm-row .cpm-detail + .cpm-end{margin-left:10px}' +
       '.cpm-row.cpm-focus,.cpm-row:hover{background:rgba(196,200,255,.30)}' +
       '.cpm-row.cpm-focus{box-shadow:0 0 0 2px rgba(255,255,255,.85) inset}' +
+      '.cpm-section{font-size:12px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:rgba(214,217,255,.75);margin:14px 6px 4px}' +
+      '.cpm-adjust{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:14px}' +
+      '.cpm-val{min-width:120px;text-align:center;color:#fff}' +
+      '.cpm-arrow{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;' +
+      'background:rgba(255,255,255,.10);font-size:20px;line-height:1;cursor:pointer}' +
+      '.cpm-row.cpm-focus .cpm-arrow{background:rgba(255,255,255,.22)}' +
       '.cpm-hint{margin-top:auto;padding-top:2vh;font-size:12.5px;color:rgba(255,255,255,.55)}' +
       '.cp-toast{position:fixed;left:50%;bottom:8vh;transform:translateX(-50%);z-index:2147483647;background:rgba(30,30,30,.92);' +
       'color:#fff;padding:10px 18px;border-radius:6px;font:14px system-ui,sans-serif}' +
@@ -1025,47 +1131,79 @@
     box.innerHTML = '';
     var head = document.createElement('div'); head.className = 'cpm-head';
     var title = document.createElement('div'); title.className = 'cpm-title';
-    if (which === 'clarity') {
+    if (which === 'clarity' || which === 'advanced') {
       var back = document.createElement('button'); back.className = 'cpm-back'; back.setAttribute('aria-label', 'Back');
       back.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       back.onclick = function () { render(rootPage); };
       title.appendChild(back);
     }
     title.appendChild(document.createTextNode(
-      which === 'main' ? 'Settings' : which === 'remote' ? 'Remote Play settings' : 'Clarity boost'));
+      which === 'main' ? 'Settings' : which === 'remote' ? 'Remote Play settings' :
+      which === 'advanced' ? 'Advanced settings' : 'Clarity boost'));
     var x = document.createElement('button'); x.className = 'cpm-close'; x.setAttribute('aria-label', 'Close');
     x.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
     x.onclick = close;
     head.appendChild(title); head.appendChild(x); box.appendChild(head);
 
     var list = document.createElement('div'); list.className = 'cpm-list';
-    var items = which === 'main' ? mainItems() : which === 'remote' ? remoteItems() : clarityItems();
-    rows = items.map(function (it, k) {
+    var items = which === 'main' ? mainItems() : which === 'remote' ? remoteItems() :
+      which === 'advanced' ? advancedItems() : clarityItems();
+    rows = [];
+    items.forEach(function (it) {
+      if (it.header) {
+        var h = document.createElement('div'); h.className = 'cpm-section'; h.textContent = it.header;
+        list.appendChild(h);
+        return;
+      }
+      var k = rows.length;
       var r = document.createElement('div'); r.className = 'cpm-row';
       var txt = document.createElement('div'); txt.className = 'cpm-txt';
       var l = document.createElement('div'); l.textContent = it.label; txt.appendChild(l);
       if (it.sub) { var sb = document.createElement('div'); sb.className = 'cpm-sub'; sb.textContent = it.sub; txt.appendChild(sb); }
       r.appendChild(txt);
-      if (it.detail) { var d = document.createElement('div'); d.className = 'cpm-detail'; d.textContent = it.detail; r.appendChild(d); }
-      var end = document.createElement('div'); end.className = 'cpm-end';
-      end.innerHTML = it.check ? CHECK : (it.check === false ? '' : CHEVRON);
-      r.appendChild(end);
-      r.addEventListener('click', function (e) { e.stopPropagation(); it.go(); });
+      if (it.adjustable) {
+        var adj = document.createElement('div'); adj.className = 'cpm-adjust';
+        var lb = document.createElement('span'); lb.className = 'cpm-arrow'; lb.textContent = '\u2039';
+        var val = document.createElement('span'); val.className = 'cpm-val'; val.textContent = it.detail;
+        var rb = document.createElement('span'); rb.className = 'cpm-arrow'; rb.textContent = '\u203A';
+        lb.addEventListener('click', function (e) { e.stopPropagation(); setFocus(k); doAdjust(-1); });
+        rb.addEventListener('click', function (e) { e.stopPropagation(); setFocus(k); doAdjust(1); });
+        adj.appendChild(lb); adj.appendChild(val); adj.appendChild(rb);
+        r.appendChild(adj);
+        r._adjust = it.adjust;
+        r._go = function () { doAdjust(1); };
+      } else {
+        if (it.detail) { var d = document.createElement('div'); d.className = 'cpm-detail'; d.textContent = it.detail; r.appendChild(d); }
+        var end = document.createElement('div'); end.className = 'cpm-end';
+        end.innerHTML = it.check ? CHECK : (it.check === false ? '' : CHEVRON);
+        r.appendChild(end);
+        r._go = it.go;
+      }
+      r.addEventListener('click', function (e) { e.stopPropagation(); r._go(); });
       r.addEventListener('mouseenter', function () { setFocus(k); });
       if (it.check) r._checked = true;
-      r._go = it.go;
       list.appendChild(r);
-      return r;
+      rows.push(r);
     });
     box.appendChild(list);
     var hint = document.createElement('div'); hint.className = 'cpm-hint';
-     hint.textContent = which === rootPage ? '\u24B6 Select    \u24B7 Close' : '\u24B6 Select    \u24B7 Back';
+     hint.textContent = (which === 'advanced' ? '\u25C0\u25B6 Change    ' : '') +
+      (which === rootPage ? '\u24B6 Select    \u24B7 Close' : '\u24B6 Select    \u24B7 Back');
     box.appendChild(hint);
     var checked = rows.findIndex(function (r) { return r._checked; });
     setFocus(keepFocus != null ? keepFocus : Math.max(0, checked));
   }
 
   function goBackOrClose() { if (page !== rootPage) render(rootPage); else close(); }
+
+  function doAdjust(d) {
+    var r = rows[focusIdx];
+    if (!r || !r._adjust) return;
+    var scroll = menuEl.querySelector('.cpm-list').scrollTop;
+    r._adjust(d);
+    render(page, focusIdx);
+    menuEl.querySelector('.cpm-list').scrollTop = scroll;
+  }
 
   // Controller navigation for the panel (D-pad / left stick, A, B), with key repeat.
   function startPadNav() {
@@ -1074,15 +1212,17 @@
       var pads = rawPads(), b = {}, dir = 0;
       pads.forEach(function (p) {
         if (!p || !p.buttons) return;
-        [0, 1, 12, 13].forEach(function (i) { if (p.buttons[i] && p.buttons[i].pressed) b[i] = true; });
-        var ay = p.axes && p.axes[1] || 0;
+        [0, 1, 12, 13, 14, 15].forEach(function (i) { if (p.buttons[i] && p.buttons[i].pressed) b[i] = true; });
+        var ax = p.axes && p.axes[0] || 0, ay = p.axes && p.axes[1] || 0;
         if (ay < -0.6) b[12] = true; if (ay > 0.6) b[13] = true;
+        if (ax < -0.6) b[14] = true; if (ax > 0.6) b[15] = true;
       });
-      if (b[12]) dir = -1; else if (b[13]) dir = 1;
+      // up/down = move (-1/+1), left/right = change value (-2/+2)
+      if (b[12]) dir = -1; else if (b[13]) dir = 1; else if (b[14]) dir = -2; else if (b[15]) dir = 2;
       var now = performance.now();
       if (dir && (dir !== holdDir || now >= nextRepeat)) {
-        nextRepeat = now + (dir !== holdDir ? 380 : 110);
-        setFocus(focusIdx + dir);
+        nextRepeat = now + (dir !== holdDir ? 380 : 120);
+        if (Math.abs(dir) === 1) setFocus(focusIdx + dir); else doAdjust(dir / 2);
       }
       holdDir = dir;
       if (b[0] && !prev[0] && rows[focusIdx]) rows[focusIdx]._go();
@@ -1096,6 +1236,8 @@
     var k = e.key;
     if (k === 'ArrowDown') setFocus(focusIdx + 1);
     else if (k === 'ArrowUp') setFocus(focusIdx - 1);
+    else if (k === 'ArrowLeft') doAdjust(-1);
+    else if (k === 'ArrowRight') doAdjust(1);
     else if (k === 'Enter' || k === ' ') { if (rows[focusIdx]) rows[focusIdx]._go(); }
     else if (k === 'Escape' || k === 'Backspace') goBackOrClose();
     else return;
@@ -1188,7 +1330,7 @@
         C.clarityPreset = next;
         try { native() && native().setClarity(next); } catch (e) {}
         span.textContent = 'Clarity boost: ' + clarityName(next);
-        if (BX) toast('Clarity boost applies when the next game starts');
+        if (bxOn()) toast('Clarity boost applies when the next game starts');
       }));
       sec.appendChild(bxButton('Show / hide touch controls', function () {
         closeBxDialog(); window.__cpTouch && __cpTouch.toggle();
@@ -1202,10 +1344,74 @@
   });
 
   // One entry point for "open settings": the Settings dialog when available, else the panel.
-  function openSettingsUi() {
-    if (BX && window.__cpOpenBx && __cpOpenBx() === 'ok') return;
-    window.__cpMenu.open();
+  function openSettingsUi() { window.__cpMenu.open(); }
+
+  // ============================================================== volume
+  var boost = { ctx: null, gain: null, el: null };
+  function streamMediaEl() {
+    var els = document.querySelectorAll('video, audio');
+    for (var i = 0; i < els.length; i++) {
+      var so = els[i].srcObject;
+      if (so && so.getAudioTracks && so.getAudioTracks().length) return els[i];
+    }
+    return null;
   }
+  function applyVolume() {
+    var v = Math.max(0.5, Math.min(3, (parseInt(C.volume, 10) || 100) / 100));
+    var el = streamMediaEl();
+    if (!el) return;
+    if (v <= 1 && !boost.ctx) { el.volume = v; return; }
+    try {
+      if (!boost.ctx || boost.el !== el) {
+        if (boost.ctx) { try { boost.ctx.close(); } catch (e) {} }
+        var ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+        var src = ctx.createMediaStreamSource(el.srcObject);
+        var gain = ctx.createGain();
+        src.connect(gain); gain.connect(ctx.destination);
+        el.muted = true; // the boosted copy plays instead
+        boost = { ctx: ctx, gain: gain, el: el };
+      }
+      boost.gain.gain.value = v;
+      if (boost.ctx.state === 'suspended' && !bgAway) boost.ctx.resume();
+    } catch (e) { el.volume = Math.min(1, v); }
+  }
+  setInterval(function () { if (lastStreaming && (parseInt(C.volume, 10) || 100) !== 100) applyVolume(); }, 1500);
+
+  // ======================================================== in-game gear
+  // A small frosted gear during games, shown whenever no gear in the stream bar is visible
+  // (the bar folds up, and Xbox changes its design), so settings are always one tap away.
+  var floatGear = null;
+  function gearVisibleInHud() {
+    var hud = findHud();
+    if (!hud) return false;
+    var g = hud.querySelector('.cp-hud-gear button, button[title="Settings"]');
+    if (!g) return false;
+    var r = g.getBoundingClientRect();
+    return r.width > 4 && r.height > 4 && r.top >= 0 && r.left >= 0;
+  }
+  function ensureFloatGear() {
+    var show = !!lastStreaming && !menuOpen && !gearVisibleInHud();
+    if (!floatGear && show) {
+      floatGear = document.createElement('button');
+      floatGear.className = 'cp-float-gear';
+      floatGear.setAttribute('aria-label', 'Settings');
+      floatGear.appendChild(gearSvg(null));
+      floatGear.style.cssText = 'position:fixed;left:12px;top:72px;z-index:2147483645;width:40px;height:40px;' +
+        'border-radius:50%;border:1px solid rgba(255,255,255,.28);color:#fff;display:flex;align-items:center;' +
+        'justify-content:center;padding:0;background:linear-gradient(135deg,rgba(58,61,94,.72),rgba(44,46,72,.66));' +
+        '-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);opacity:.6;transition:opacity .15s;' +
+        'box-shadow:0 4px 16px rgba(0,0,0,.35)';
+      floatGear.querySelector('svg').setAttribute('width', '22');
+      floatGear.querySelector('svg').setAttribute('height', '22');
+      floatGear.addEventListener('pointerdown', function () { floatGear.style.opacity = '1'; });
+      floatGear.addEventListener('click', function (e) {
+        e.preventDefault(); e.stopPropagation(); floatGear.style.opacity = '.6'; window.__cpMenu.open();
+      }, true);
+      document.documentElement.appendChild(floatGear);
+    }
+    if (floatGear) floatGear.style.display = show ? 'flex' : 'none';
+  }
+  onReady(function () { setInterval(ensureFloatGear, 500); });
 
   // ================================================================ latency
   // Ask WebRTC for the smallest playout buffer: lower input-to-photon delay.
@@ -1534,11 +1740,11 @@
   onReady(function () { setInterval(tick, 400); });
 
   // ============================================================ stats panel
-  if (!BX) {
+  if (true) {
     var el = null, prev = {};
     setInterval(async function () {
       var pc = pcs.filter(function (p) { return p.connectionState === 'connected'; }).pop();
-      if (!pc || !C.showStats) { if (el) el.style.display = 'none'; prev = {}; return; }
+      if (!pc || !C.showStats || bxOn()) { if (el) el.style.display = 'none'; prev = {}; return; }
       if (!el) {
         el = document.createElement('div');
         el.style.cssText = 'position:fixed;top:6px;left:6px;z-index:2147483647;background:rgba(0,0,0,.6);' +

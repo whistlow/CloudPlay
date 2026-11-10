@@ -184,7 +184,7 @@ class GamepadBridge implements InputManager.InputDeviceListener {
         InputDevice.MotionRange r = d.getMotionRange(axis, e.getSource());
         if (r == null) return 0f;
         float v = e.getAxisValue(axis);
-        float flat = Math.max(r.getFlat(), 0.05f);
+        float flat = r.getFlat(); // the page applies the user's deadzone setting on top
         return Math.abs(v) <= flat ? 0f : Math.max(-1f, Math.min(1f, v));
     }
 
