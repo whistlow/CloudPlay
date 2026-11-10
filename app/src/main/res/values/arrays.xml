@@ -154,12 +154,12 @@
     </string-array>
 
     <string-array name="rp_entries">
-        <item>Standard (works anywhere, same as the Xbox website)</item>
-        <item>Direct (home Wi-Fi only, lower latency)</item>
+        <item>Auto: fastest route, at home or away (recommended)</item>
+        <item>Standard: exactly like the Xbox website</item>
     </string-array>
     <string-array name="rp_values">
+        <item>auto</item>
         <item>standard</item>
-        <item>direct</item>
     </string-array>
 
     <string-array name="rp_res_entries">

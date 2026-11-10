@@ -104,7 +104,7 @@
             app:title="Connection"
             app:entries="@array/rp_entries"
             app:entryValues="@array/rp_values"
-            app:defaultValue="standard"
+            app:defaultValue="auto"
             app:useSimpleSummaryProvider="true"
             app:iconSpaceReserved="false" />
     </PreferenceCategory>

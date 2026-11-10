@@ -11,8 +11,13 @@
   var BX = C.engine === 'betterxcloud';
   // Remote Play: "standard" connects exactly like the Xbox website (works on any network);
   // "direct" adds the console's home addresses for a faster link on the same Wi-Fi.
-  var DIRECT_RP = C.remotePlayMode === 'direct';
-  window.__cpStockRemotePlay = !DIRECT_RP;
+  // Remote Play connection: "auto" (default) adds your console's direct addresses next to
+  // Xbox's own routes, so it connects straight to the console when it can (home Wi-Fi, or
+  // directly over the internet) and through Xbox's relay when it can't. "standard" leaves
+  // the connection exactly as the Xbox website makes it. (Older "direct" = auto.)
+  var RP_MODE = C.remotePlayMode === 'standard' ? 'standard' : 'auto';
+  var DIRECT_RP = false;
+  window.__cpStockRemotePlay = true;
   // Standard Remote Play runs as the plain Xbox website: no enhancement engine and no
   // stream tweaks on /play/consoles pages, only controller input and rumble.
   var PURE_RP = !DIRECT_RP && /\/play\/consoles/.test(location.pathname);
@@ -305,17 +310,72 @@
     return res;
   }
 
-  // Remote Play resolution (standard connection): only tells Xbox which kind of device is
-  // connecting; everything else about the connection stays exactly as the website does it.
-  if (PURE_RP && OS_NAMES[C.rpResolution]) window.fetch = async function (input, init) {
+  // Remote Play: optional resolution (tells Xbox which kind of device is connecting) and, in
+  // Auto mode, extra direct routes to the console. Xbox's own routes are never changed or
+  // removed, so it always works anywhere the website works.
+  var rpConsole = [];
+
+  function rpAddCandidates(list) {
+    if (!rpConsole.length || !Array.isArray(list)) return list;
+    var tmpl = list.filter(function (c) { return c && c.sdpMid != null; })[0] || {};
+    var end = list.findIndex(function (c) { return /end-of-candidates/.test((c && c.candidate) || ''); });
+    var extra = [];
+    rpConsole.forEach(function (a, i) {
+      var exists = list.some(function (c) { return ((c && c.candidate) || '').indexOf(' ' + a.ip + ' ' + a.port + ' ') >= 0; });
+      if (exists) return;
+      extra.push({
+        candidate: 'a=candidate:' + (91 + i) + ' 1 UDP ' + (2130706431 - i) + ' ' + a.ip + ' ' + a.port + ' typ host',
+        messageType: tmpl.messageType || 'iceCandidate',
+        sdpMLineIndex: tmpl.sdpMLineIndex != null ? tmpl.sdpMLineIndex : '0',
+        sdpMid: tmpl.sdpMid != null ? tmpl.sdpMid : '0'
+      });
+    });
+    if (end < 0) end = list.length;
+    return list.slice(0, end).concat(extra, list.slice(end));
+  }
+
+  if (PURE_RP && (RP_MODE === 'auto' || OS_NAMES[C.rpResolution])) window.fetch = async function (input, init) {
     var url = typeof input === 'string' ? input : (input && input.url) || String(input);
     if (!isXhome(url)) return origFetch.call(this, input, init);
-    var req = new Request(input, init);
-    var headers = new Headers(req.headers);
-    headers.set('x-ms-device-info', deviceInfo(C.rpResolution));
-    var opts = { method: req.method, headers: headers };
-    if (req.method !== 'GET' && req.method !== 'HEAD') opts.body = await req.clone().text();
-    return origFetch(new Request(req.url, opts));
+    var path = url.split('?')[0];
+    var method = ((init && init.method) || (typeof input !== 'string' && input && input.method) || 'GET').toUpperCase();
+
+    var res;
+    if (OS_NAMES[C.rpResolution]) {
+      var req = new Request(input, init);
+      var headers = new Headers(req.headers);
+      headers.set('x-ms-device-info', deviceInfo(C.rpResolution));
+      var opts = { method: req.method, headers: headers };
+      if (req.method !== 'GET' && req.method !== 'HEAD') opts.body = await req.clone().text();
+      res = await origFetch(new Request(req.url, opts));
+    } else {
+      res = await origFetch.call(this, input, init);
+    }
+    if (RP_MODE !== 'auto' || !res.ok) return res;
+
+    try {
+      if (url.indexOf('/configuration') >= 0) {
+        var d = (await res.clone().json()).serverDetails || {};
+        rpConsole = [];
+        [['ipAddress', 'port'], ['ipV4Address', 'ipV4Port'], ['ipV6Address', 'ipV6Port']].forEach(function (k) {
+          var ip = d[k[0]];
+          if (!ip) return;
+          [d[k[1]], 9002].forEach(function (port) {
+            if (port && !rpConsole.some(function (a) { return a.ip === ip && a.port === port; })) {
+              rpConsole.push({ ip: ip, port: port });
+            }
+          });
+        });
+      } else if (/\/ice$/.test(path) && method === 'GET') {
+        var text = await res.clone().text();
+        if (text) {
+          var obj = JSON.parse(text);
+          obj.exchangeResponse = JSON.stringify(rpAddCandidates(JSON.parse(obj.exchangeResponse)));
+          return jsonResponse(res, obj);
+        }
+      }
+    } catch (e) {}
+    return res;
   };
 
   if (ACTIVE) window.fetch = async function (input, init) {
@@ -798,8 +858,8 @@
         C.rpResolution = n[0]; savePref('rp_resolution', n[0]); render('remote', focusIdx);
       } },
       { label: 'Connection', sub: 'Applies next time you connect',
-        detail: C.remotePlayMode === 'direct' ? 'Direct (home Wi-Fi)' : 'Standard', go: function () {
-        C.remotePlayMode = C.remotePlayMode === 'direct' ? 'standard' : 'direct';
+        detail: C.remotePlayMode === 'standard' ? 'Standard' : 'Auto (fastest)', go: function () {
+        C.remotePlayMode = C.remotePlayMode === 'standard' ? 'auto' : 'standard';
         savePref('remote_play_mode', C.remotePlayMode); render('remote', focusIdx);
       } },
       { label: 'Touch controls', sub: 'Show or hide on-screen buttons', go: function () { close(); window.__cpTouch && __cpTouch.toggle(); } },
@@ -1101,20 +1161,49 @@
 
   // ================================================================ latency
   // Ask WebRTC for the smallest playout buffer: lower input-to-photon delay.
-  if (C.lowLatency !== false && ACTIVE) {
-    setInterval(function () {
-      // Remote Play goes over the internet to your console: keep the normal buffer there.
-      if (location.pathname.indexOf('/play/consoles') >= 0) return;
-      pcs.forEach(function (pc) {
-        if (pc.connectionState === 'closed') return;
+  if (C.lowLatency !== false) {
+    setInterval(async function () {
+      // Remote Play: smallest buffer only on a direct home-network route; over the internet
+      // the normal buffer keeps it smooth.
+      var rp = location.pathname.indexOf('/play/consoles') >= 0;
+      if (!rp && !ACTIVE) return;
+      for (var i = 0; i < pcs.length; i++) {
+        var pc = pcs[i];
+        if (pc.connectionState === 'closed') continue;
+        if (rp) {
+          var route = await routeInfo(pc);
+          if (!route || route.kind !== 'home') continue;
+        }
         try {
           pc.getReceivers().forEach(function (r) {
             if ('jitterBufferTarget' in r) { if (r.jitterBufferTarget !== 0) r.jitterBufferTarget = 0; }
             else if ('playoutDelayHint' in r) { if (r.playoutDelayHint !== 0) r.playoutDelayHint = 0; }
           });
         } catch (e) {}
-      });
+      }
     }, 1000);
+  }
+
+  // Which route the stream is using: home network (direct), internet (direct) or relay.
+  function isPrivateIp(a) {
+    return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|fe80:|f[cd][0-9a-f]{2}:)/i.test(a || '');
+  }
+  async function routeInfo(pc) {
+    try {
+      var stats = await pc.getStats(), pair = null, byId = {};
+      stats.forEach(function (r) {
+        byId[r.id] = r;
+        if (r.type === 'transport' && r.selectedCandidatePairId) pair = r.selectedCandidatePairId;
+      });
+      pair = pair ? byId[pair] : null;
+      if (!pair) stats.forEach(function (r) { if (r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded') pair = r; });
+      if (!pair) return null;
+      var rc = byId[pair.remoteCandidateId] || {}, lc = byId[pair.localCandidateId] || {};
+      var addr = rc.address || rc.ip;
+      var kind = rc.candidateType === 'relay' || lc.candidateType === 'relay' ? 'relay'
+        : isPrivateIp(addr) ? 'home' : 'internet';
+      return { kind: kind, address: addr };
+    } catch (e) { return null; }
   }
 
   // ======================================================== touch overlay UI
@@ -1426,9 +1515,11 @@
         frames: v.framesDecoded || 0, decode: v.totalDecodeTime || 0 };
       var codec = v.codecId && codecs[v.codecId] ? codecs[v.codecId].mimeType.replace('video/', '') : '';
       var ping = pair && pair.currentRoundTripTime != null ? Math.round(pair.currentRoundTripTime * 1000) + ' ms' : '-';
+      var route = location.pathname.indexOf('/play/consoles') >= 0 ? await routeInfo(pc) : null;
       el.textContent = (v.frameWidth || '?') + 'x' + (v.frameHeight || '?') + ' ' + codec + '  ' +
         Math.round(v.framesPerSecond || 0) + ' fps\n' +
-        'Ping ' + ping + '  ' + mbps + ' Mbps  Loss ' + loss + '%  Decode ' + dec + ' ms';
+        'Ping ' + ping + '  ' + mbps + ' Mbps  Loss ' + loss + '%  Decode ' + dec + ' ms' +
+        (route ? '\nRoute: ' + ({ home: 'Home network (direct)', internet: 'Internet (direct)', relay: 'Xbox relay' })[route.kind] : '');
       el.style.display = 'block';
     }, 1000);
   }

@@ -84,6 +84,10 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
+        // One-time move to the new Auto Remote Play connection.
+        if (!prefs().getBoolean("rp_auto_v1", false)) {
+            prefs().edit().putString("remote_play_mode", "auto").putBoolean("rp_auto_v1", true).apply();
+        }
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         scriptBody = readAsset("cloudplay.js");
         rumbler = new Rumbler(this);
@@ -340,7 +344,7 @@ public class MainActivity extends AppCompatActivity {
             o.put("controllerInput", p.getString("controller_input", "auto"));
             o.put("lowLatency", p.getBoolean("low_latency", true));
             o.put("clarityPreset", p.getString("clarity_preset", "off"));
-            o.put("remotePlayMode", p.getString("remote_play_mode", "standard"));
+            o.put("remotePlayMode", p.getString("remote_play_mode", "auto"));
             o.put("fastArt", p.getBoolean("fast_art", true));
             o.put("rpResolution", p.getString("rp_resolution", "auto"));
             o.put("keepAlive", p.getBoolean("keep_alive", true));
