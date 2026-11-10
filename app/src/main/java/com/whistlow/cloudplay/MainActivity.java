@@ -84,6 +84,10 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
+        // One-time: zero-buffer mode off (it caused blocky video glitches on busy Wi-Fi).
+        if (!prefs().getBoolean("ll_off_v1", false)) {
+            prefs().edit().putBoolean("low_latency", false).putBoolean("ll_off_v1", true).apply();
+        }
         // One-time move to the new Auto Remote Play connection.
         if (!prefs().getBoolean("rp_auto_v1", false)) {
             prefs().edit().putString("remote_play_mode", "auto").putBoolean("rp_auto_v1", true).apply();
@@ -352,7 +356,7 @@ public class MainActivity extends AppCompatActivity {
             o.put("touchSize", p.getInt("touch_size", 100));
             o.put("touchLayout", p.getString("touch_layout", ""));
             o.put("controllerInput", p.getString("controller_input", "auto"));
-            o.put("lowLatency", p.getBoolean("low_latency", true));
+            o.put("lowLatency", p.getBoolean("low_latency", false));
             o.put("clarityPreset", p.getString("clarity_preset", "off"));
             o.put("remotePlayMode", p.getString("remote_play_mode", "auto"));
             o.put("fastArt", p.getBoolean("fast_art", true));

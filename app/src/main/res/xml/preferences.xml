@@ -243,9 +243,9 @@
             app:iconSpaceReserved="false" />
         <SwitchPreferenceCompat
             app:key="low_latency"
-            app:title="Low-latency mode"
-            app:summary="Smallest video and audio buffer for the quickest response. Turn off if the stream stutters on a weak connection."
-            app:defaultValue="true"
+            app:title="Zero-buffer mode (experimental)"
+            app:summary="Slightly quicker response, but any dropped packet shows as blocky glitches. Leave off for the smoothest picture."
+            app:defaultValue="false"
             app:iconSpaceReserved="false" />
         <SwitchPreferenceCompat
             app:key="max_refresh"

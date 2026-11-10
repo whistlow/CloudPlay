@@ -1161,7 +1161,9 @@
 
   // ================================================================ latency
   // Ask WebRTC for the smallest playout buffer: lower input-to-photon delay.
-  if (C.lowLatency !== false) {
+  // Off by default: a zero buffer leaves no time for lost video packets to be re-sent, which
+  // shows up as blocky glitches. The stream's own adaptive buffer is the smooth choice.
+  if (C.lowLatency === true) {
     setInterval(async function () {
       // Remote Play: smallest buffer only on a direct home-network route; over the internet
       // the normal buffer keeps it smooth.
