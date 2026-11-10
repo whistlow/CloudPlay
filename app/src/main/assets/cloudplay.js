@@ -1390,13 +1390,10 @@
   // A small frosted gear during games, shown whenever no gear in the stream bar is visible
   // (the bar folds up, and Xbox changes its design), so settings are always one tap away.
   var floatGear = null;
+  // Any gear already in the game's bar? (Checked by presence: the copied wrapper can report
+  // zero size even while its icon shows.) The floating gear is only a backup for when there's none.
   function gearVisibleInHud() {
-    var gs = document.querySelectorAll('.cp-hud-gear, .cp-bar-gear, #StreamHud button[title="Settings"]');
-    for (var i = 0; i < gs.length; i++) {
-      var r = gs[i].getBoundingClientRect();
-      if (r.width > 4 && r.height > 4 && r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight) return true;
-    }
-    return false;
+    return !!document.querySelector('.cp-hud-gear, .cp-bar-gear, #StreamHud button[title="Settings"]');
   }
 
   // Xbox's newer in-game bar (Xbox logo + dots) isn't the old "StreamHud", so find it by
@@ -1444,8 +1441,7 @@
   }
   function ensureBarGear() {
     var existing = document.querySelector('.cp-bar-gear');
-    if (existing && existing.isConnected && existing.getBoundingClientRect().width > 0) return;
-    if (existing) existing.remove();
+    if (existing && existing.isConnected) return;
     if (findHud() && document.querySelector('.cp-hud-gear')) return; // classic bar already has one
     var bar = findStreamBar();
     if (!bar) return;
