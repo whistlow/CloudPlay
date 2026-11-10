@@ -156,7 +156,12 @@ public class MainActivity extends AppCompatActivity {
         s.setSaveFormData(false);
         s.setSupportMultipleWindows(false); // keep sign-in popups in this view
         // Present as regular Chrome: drop the WebView markers from the UA string and brand list.
-        s.setUserAgentString(s.getUserAgentString().replace("; wv", "").replace("Version/4.0 ", ""));
+        String ua = s.getUserAgentString().replace("; wv", "").replace("Version/4.0 ", "");
+        // Large-screen devices get a tablet user agent (no "Mobile"), which Xbox's server takes
+        // for a TV and answers with the older TV layout, swapping to the regular one only once
+        // the page's code has loaded. Saying "Mobile" gets the regular layout from the start.
+        if (!ua.contains(" Mobile")) ua = ua.replace(" Safari/", " Mobile Safari/");
+        s.setUserAgentString(ua);
         applyChromeBrands(s);
 
         CookieManager cookies = CookieManager.getInstance();
@@ -239,7 +244,7 @@ public class MainActivity extends AppCompatActivity {
             list.add(new UserAgentMetadata.BrandVersion.Builder()
                     .setBrand("Google Chrome").setMajorVersion(major).setFullVersion(full).build());
             WebSettingsCompat.setUserAgentMetadata(s,
-                    new UserAgentMetadata.Builder(cur).setBrandVersionList(list).build());
+                    new UserAgentMetadata.Builder(cur).setBrandVersionList(list).setMobile(true).build());
         } catch (Exception ignored) {
         }
     }

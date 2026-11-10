@@ -680,7 +680,9 @@
     style.id = 'cp-style';
     style.textContent = 'video{' + (bxOn() ? '' : 'object-fit:' + (C.videoFit || 'contain') + ' !important;') +
       (filters.length ? 'filter:' + filters.join(' ') + ' !important;' : '') + '}' +
-      'html,body{overscroll-behavior:none;}';
+      'html,body{overscroll-behavior:none;}' +
+      // the strip of Microsoft links at the bottom of pages (language, privacy, terms...)
+      'footer,#uhf-footer,[class*="Footer-module__"],[class*="footer-module__"]{display:none !important}';
     (document.head || document.documentElement).appendChild(style);
     if (gpu) gpu.settingsChanged = true;
   }
@@ -1498,7 +1500,7 @@
   // mid-game, the stream reconnects as soon as the panel closes, so they apply right away.
   var pendingReconnect = false;
   function nextText() {
-    return lastStreaming ? 'Applies right away (the stream restarts with it)' : 'Applies when the next game starts';
+    return lastStreaming ? 'Applies when you close this menu (the stream restarts)' : 'Applies when the next game starts';
   }
   // Stream settings are fixed by the server when a stream starts, so a change mid-game
   // restarts the stream straight away (a moment after the last change, so you can step
@@ -1506,8 +1508,9 @@
   var reconnectTimer = null;
   function needReconnect() {
     if (!lastStreaming) return;
+    if (menuEl) { pendingReconnect = true; return; } // waits until you close the menu
     clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(reconnectNow, 1200);
+    reconnectTimer = setTimeout(reconnectNow, 600);
   }
   function reconnectNow() {
     try {
@@ -1782,7 +1785,7 @@
 
   function close() {
     if (!menuEl) return;
-
+    if (pendingReconnect) { pendingReconnect = false; if (lastStreaming) setTimeout(reconnectNow, 150); }
     clearInterval(padTimer); padTimer = null;
     window.removeEventListener('keydown', onKey, true);
     menuEl.remove(); menuEl = null; rows = [];
@@ -1979,6 +1982,36 @@
     return false;
   }
 
+  // The stream menu moves focus itself with the controller and presses the focused item
+  // through its own code, which our gear isn't part of; so A on the gear is caught here.
+  var barOpenAt = 0;
+  function openFromBar() {
+    if (Date.now() - barOpenAt < 600) return;
+    barOpenAt = Date.now();
+    window.__cpMenu.open();
+  }
+  ['pointerup', 'touchend'].forEach(function (ev) {
+    document.addEventListener(ev, function (e) {
+      var t = e.target && e.target.closest && e.target.closest('.cp-bar-gear,.cp-hud-gear');
+      if (t) { e.preventDefault(); e.stopPropagation(); openFromBar(); }
+    }, true);
+  });
+  var barA = false;
+  setInterval(function () {
+    if (!lastStreaming || menuEl) { barA = false; return; }
+    var pressed = false;
+    try {
+      var list = navigator.getGamepads ? navigator.getGamepads() : [];
+      for (var i = 0; i < list.length; i++) if (list[i] && list[i].buttons[0] && list[i].buttons[0].pressed) pressed = true;
+    } catch (e) {}
+    if (pressed && !barA) {
+      var a = document.activeElement;
+      var focused = a && a.closest && a.closest('.cp-bar-gear,.cp-hud-gear');
+      if (focused) openFromBar();
+    }
+    barA = pressed;
+  }, 40);
+
   function ensureBarGear() {
     if (engineGearShowing()) { // one gear is enough
       document.querySelectorAll('.cp-bar-gear').forEach(function (g) { g.remove(); });
@@ -2006,8 +2039,12 @@
     btn.setAttribute('aria-label', 'Settings');
     btn.setAttribute('title', 'Settings');
     var svg = g.querySelector('svg'); if (svg) svg.style.fill = 'none';
+    btn.tabIndex = 0;
     g.addEventListener('click', function (e) {
-      e.preventDefault(); e.stopPropagation(); window.__cpMenu.open();
+      e.preventDefault(); e.stopPropagation(); openFromBar();
+    }, true);
+    g.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); openFromBar(); }
     }, true);
     row.insertBefore(g, last);
   }
