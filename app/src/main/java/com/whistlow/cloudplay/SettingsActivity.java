@@ -49,6 +49,64 @@ public class SettingsActivity extends AppCompatActivity {
         return true;
     }
 
+    /** Draws each settings section as a rounded card under its green header, Xbox-style. */
+    static class CardDecoration extends androidx.recyclerview.widget.RecyclerView.ItemDecoration {
+        private final android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Paint stroke = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final float radius, gap;
+
+        CardDecoration(float density) {
+            paint.setColor(0xFF1C1C1C);
+            stroke.setColor(0x14FFFFFF);
+            stroke.setStyle(android.graphics.Paint.Style.STROKE);
+            stroke.setStrokeWidth(density);
+            radius = 14 * density;
+            gap = 14 * density;
+        }
+
+        private static boolean isHeader(androidx.recyclerview.widget.RecyclerView parent, android.view.View v) {
+            int pos = parent.getChildAdapterPosition(v);
+            androidx.recyclerview.widget.RecyclerView.Adapter<?> a = parent.getAdapter();
+            if (pos < 0 || !(a instanceof androidx.preference.PreferenceGroupAdapter)) return false;
+            return ((androidx.preference.PreferenceGroupAdapter) a).getItem(pos)
+                    instanceof androidx.preference.PreferenceCategory;
+        }
+
+        @Override
+        public void getItemOffsets(@androidx.annotation.NonNull android.graphics.Rect out,
+                                   @androidx.annotation.NonNull android.view.View v,
+                                   @androidx.annotation.NonNull androidx.recyclerview.widget.RecyclerView parent,
+                                   @androidx.annotation.NonNull androidx.recyclerview.widget.RecyclerView.State state) {
+            if (isHeader(parent, v) && parent.getChildAdapterPosition(v) > 0) out.top = (int) gap;
+        }
+
+        @Override
+        public void onDraw(@androidx.annotation.NonNull android.graphics.Canvas c,
+                           @androidx.annotation.NonNull androidx.recyclerview.widget.RecyclerView parent,
+                           @androidx.annotation.NonNull androidx.recyclerview.widget.RecyclerView.State state) {
+            float left = parent.getPaddingLeft(), right = parent.getWidth() - parent.getPaddingRight();
+            float top = -1, bottom = -1;
+            for (int i = 0; i < parent.getChildCount(); i++) {
+                android.view.View v = parent.getChildAt(i);
+                if (v.getVisibility() != android.view.View.VISIBLE || v.getHeight() == 0) continue;
+                if (isHeader(parent, v)) {
+                    if (top >= 0) draw(c, left, top, right, bottom);
+                    top = -1;
+                    continue;
+                }
+                if (top < 0) top = v.getTop() + v.getTranslationY();
+                bottom = v.getBottom() + v.getTranslationY();
+            }
+            if (top >= 0) draw(c, left, top, right, bottom);
+        }
+
+        private void draw(android.graphics.Canvas c, float l, float t, float r, float b) {
+            android.graphics.RectF rect = new android.graphics.RectF(l, t, r, b);
+            c.drawRoundRect(rect, radius, radius, paint);
+            c.drawRoundRect(rect, radius, radius, stroke);
+        }
+    }
+
     public static class SettingsFragment extends PreferenceFragmentCompat {
 
         @Override
@@ -63,6 +121,7 @@ public class SettingsActivity extends AppCompatActivity {
             int side = Math.max(Math.round(8 * density), (width - column) / 2);
             list.setPadding(side, Math.round(8 * density), side, Math.round(32 * density));
             list.setClipToPadding(false);
+            list.addItemDecoration(new CardDecoration(density));
         }
 
         @Override

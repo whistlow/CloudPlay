@@ -871,7 +871,7 @@
   // Gear in the in-game bar (next to the Xbox and controller buttons), cloned from the bar's
   // own button so it matches. Used wherever the enhancement engine isn't adding its own.
   function ensureHudGear() {
-    if (BX) return;
+    if (BX && window.__bxMainOk) return; // the engine adds its own gear
     var hud = document.getElementById('StreamHud');
     if (!hud || hud.querySelector('.cp-hud-gear')) return;
     var org = hud.querySelector('div[class^=HUDButton]');

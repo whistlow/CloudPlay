@@ -288,8 +288,18 @@ public class MainActivity extends AppCompatActivity {
                 // Stop right away inside iframes: only the main page needs it.
                 // ...and on standard Remote Play pages, which run as the plain Xbox website.
                 bxScript = "\"use strict\";\nif (window.top !== window) throw 'skip-frame';\n"
-                        + "if (window.__cpPureRemote) throw 'skip-remote-play';\nwindow.BX_FLAGS="
-                        + flags + ";\n" + readAsset("better-xcloud/better-xcloud.user.js");
+                        + "if (window.__cpPureRemote) throw 'skip-remote-play';\n"
+                        // The engine starts before the page has an <html> element; anything it
+                        // adds to the root waits until the element exists.
+                        + "function __cpAppendRoot(el) {\n"
+                        + "  if (document.documentElement) return document.documentElement.appendChild(el);\n"
+                        + "  new MutationObserver(function (m, o) {\n"
+                        + "    if (document.documentElement) { o.disconnect(); document.documentElement.appendChild(el); }\n"
+                        + "  }).observe(document, { childList: true });\n"
+                        + "  return el;\n"
+                        + "}\nwindow.BX_FLAGS="
+                        + flags + ";\n" + readAsset("better-xcloud/better-xcloud.user.js")
+                        + "\n;window.__bxMainOk = true;";
             }
             bx = bxScript;
         }
