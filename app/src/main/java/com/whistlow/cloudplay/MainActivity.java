@@ -431,6 +431,14 @@ public class MainActivity extends AppCompatActivity {
         return o;
     }
 
+    private static String engineOf(String cfg) {
+        try {
+            return new JSONObject(cfg).optString("engine", "");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     /** Save a changed setting that the page can apply live, without reloading. */
     private void refreshScriptWithoutReload() {
         appliedConfig = buildConfig();
@@ -599,15 +607,19 @@ public class MainActivity extends AppCompatActivity {
         String cfg = buildConfig();
         String url = startUrl();
         if (!cfg.equals(appliedConfig) || !url.equals(appliedUrl)) {
+            // Apply in place: no reload, so a game or Remote Play session keeps running.
+            // Picture, sound, controls and overlays change right away; stream quality is used
+            // the next time a stream starts. Only switching engines needs a fresh page.
+            boolean engineChanged = !engineOf(cfg).equals(engineOf(appliedConfig));
             appliedConfig = cfg;
             installScript();
+            webView.evaluateJavascript("window.__cpApplyCfg&&__cpApplyCfg(" + cfg + ")", null);
             if (!url.equals(appliedUrl)) {
-                appliedUrl = url;
-                webView.loadUrl(url);
-            } else {
+                appliedUrl = url; // the new start page is used next launch
+            }
+            if (engineChanged && !streaming) {
                 webView.reload();
             }
-            Toast.makeText(this, "Settings applied", Toast.LENGTH_SHORT).show();
         }
 
         applyPerformance();

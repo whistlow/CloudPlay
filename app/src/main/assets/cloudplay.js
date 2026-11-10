@@ -115,6 +115,14 @@
     } catch (e) {}
   }
   var bgMuted = [], bgAway = false;
+  // Settings changed in App settings arrive here and apply in place, without reloading.
+  window.__cpApplyCfg = function (o) {
+    try {
+      Object.keys(o || {}).forEach(function (k) { C[k] = o[k]; });
+      if (typeof applyVideoStyle === 'function') applyVideoStyle();
+      if (typeof applyVolume === 'function') applyVolume();
+    } catch (e) {}
+  };
   window.__cpBackground = function (away) {
     bgAway = away;
     if (C.bgAudio) return;
@@ -435,22 +443,39 @@
   // Remote Play resolution: its own setting if chosen; "Auto" follows the main stream
   // resolution (1080p if that's Auto too). Without this Xbox sees an Android handheld and
   // sends a lower-quality stream. Standard mode only sends it when picked explicitly.
-  var RP_STREAM_RES = OS_NAMES[C.rpResolution] ? C.rpResolution
-    : RP_MODE === 'standard' ? null
-    : '1080p'; // your own console: always ask for full HD (not the cloud setting, which "Lowest latency" drops to 720p)
-  if (PURE_RP && (RP_MODE === 'auto' || RP_STREAM_RES)) window.fetch = async function (input, init) {
+  // Read on every request, so a changed setting is used the next time you connect, no reload.
+  // Auto asks your console for its best stream: 1080p HQ (the higher-bitrate full HD profile).
+  function rpStreamRes() {
+    return OS_NAMES[C.rpResolution] ? C.rpResolution
+      : RP_MODE === 'standard' ? null
+      : '1080p_hq';
+  }
+  if (PURE_RP) window.fetch = async function (input, init) {
     var url = typeof input === 'string' ? input : (input && input.url) || String(input);
     if (!isXhome(url)) return origFetch.call(this, input, init);
     var path = url.split('?')[0];
     var method = ((init && init.method) || (typeof input !== 'string' && input && input.method) || 'GET').toUpperCase();
 
     var res;
+    var RP_STREAM_RES = rpStreamRes();
     if (RP_STREAM_RES) {
       var req = new Request(input, init);
       var headers = new Headers(req.headers);
       headers.set('x-ms-device-info', deviceInfo(RP_STREAM_RES));
       var opts = { method: req.method, headers: headers };
-      if (req.method !== 'GET' && req.method !== 'HEAD') opts.body = await req.clone().text();
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        opts.body = await req.clone().text();
+        // The start request also names the device type in its body; the console picks the
+        // stream quality from it, so it has to match the header or it stays at 720p.
+        if (/\/sessions\/home\/play$/.test(path)) {
+          try {
+            var b = JSON.parse(opts.body);
+            b.settings = b.settings || {};
+            b.settings.osName = OS_NAMES[RP_STREAM_RES];
+            opts.body = JSON.stringify(b);
+          } catch (e) {}
+        }
+      }
       res = await origFetch(new Request(req.url, opts));
     } else {
       res = await origFetch.call(this, input, init);
@@ -1086,7 +1111,7 @@
   // Remote Play settings: picture options apply instantly (display only); resolution and
   // connection apply the next time you connect to your console.
   var FITS = [['contain', 'Fit'], ['cover', 'Zoom to fill'], ['fill', 'Stretch']];
-  var RP_RES = [['auto', 'Auto (1080p)'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']];
+  var RP_RES = [['auto', 'Auto (1080p HQ)'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']];
   function nextOf(list, cur) {
     var i = list.findIndex(function (x) { return x[0] === cur; });
     return list[(i + 1) % list.length];
@@ -1237,7 +1262,7 @@
   // mid-game, the stream reconnects as soon as the panel closes, so they apply right away.
   var pendingReconnect = false;
   function nextText() {
-    return lastStreaming ? 'Applies right away (the stream reconnects for a moment)' : 'Applies when the next game starts';
+    return 'Set when a stream starts, so it\u2019s used next time (no reload)';
   }
   function needReconnect() { if (lastStreaming) pendingReconnect = true; }
   function livePicture() { C.clarityPreset = 'custom'; savePref('clarity_preset', 'custom', 's'); applyVideoStyle(); }
@@ -1290,7 +1315,7 @@
       choice('Connection', 'remote_play_mode', 'remotePlayMode', [['auto', 'Auto (fastest)'], ['standard', 'Standard']], { sub: NEXT, reconnect: true }),
       choice('Sharpening', 'rp_sharpen', 'rpSharpen', [['medium', 'Medium'], ['high', 'High'], ['low', 'Low'], ['off', 'Off']],
         { sub: 'Graphics-chip sharpening for a crisper picture than the website', live: function () { applyVideoStyle(); } }),
-      choice('Resolution', 'rp_resolution', 'rpResolution', [['auto', 'Auto (1080p)'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']], { sub: NEXT, reconnect: true })
+      choice('Resolution', 'rp_resolution', 'rpResolution', [['auto', 'Auto (1080p HQ)'], ['720p', '720p'], ['1080p', '1080p'], ['1080p_hq', '1080p HQ']], { sub: NEXT, reconnect: true })
     ];
   }
 
@@ -1499,8 +1524,7 @@
     if (!menuEl) return;
     if (pendingReconnect) {
       pendingReconnect = false;
-      toast('Applying your settings\u2026');
-      setTimeout(function () { location.reload(); }, 450); // gives the app time to save them
+      toast('Saved. Used the next time a stream starts');
     }
     clearInterval(padTimer); padTimer = null;
     window.removeEventListener('keydown', onKey, true);
