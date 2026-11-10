@@ -25,8 +25,9 @@
   var ACTIVE = !PURE_RP;
   if (PURE_RP) BX = false;
 
-  // Always the regular Xbox website layout. On controller-first devices (handhelds, TVs)
-  // the site switches to its older full-screen "TV" layout; this keeps the normal one.
+  // Always Xbox's new console-style layout (Home / Library / Search across the top, Remote
+  // Play button, Guide on the Xbox button). The site otherwise falls back to the older
+  // "Cloud Gaming" layout on some devices.
   // Works by rewriting the one choice in the site's code as its modules load.
   (function () {
     var TV = '?"tv":"default"';
@@ -40,7 +41,7 @@
           if (typeof f !== 'function') continue;
           var src = Function.prototype.toString.call(f);
           if (src.indexOf(TV) < 0) continue;
-          src = src.split(TV).join('?"default":"default"');
+          src = src.split(TV).join('?"tv":"tv"');
           var body = src.replace(/^\d+/, '');
           var tries = [body, 'function ' + body.replace(/^function\s*/, '')];
           for (var i = 0; i < tries.length; i++) {
@@ -143,73 +144,6 @@
     })();
   })();
 
-  // Xbox's Guide panel (a full-screen overlay with a rail of icons down the left: Xbox,
-  // friends, chats, profile) looks like the old layout and pops up by itself, e.g. after
-  // switching apps. It's closed as soon as it appears, so only the regular layout shows.
-  (function () {
-    function visible(el) {
-      var r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0;
-    }
-    function overlayOf(el, vw, vh) {
-      for (var a = el.parentElement; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
-        var cs = getComputedStyle(a);
-        if (cs.position !== 'fixed' && cs.position !== 'absolute') continue;
-        var r = a.getBoundingClientRect();
-        if (r.width >= vw * 0.7 && r.height >= vh * 0.7) return a;
-      }
-      return null;
-    }
-    function hasLeftRail(ov, vw, vh) {
-      var n = 0;
-      ov.querySelectorAll('button,a,[role="tab"],[tabindex]').forEach(function (b) {
-        var r = b.getBoundingClientRect();
-        if (r.width > 0 && r.left < vw * 0.14 && r.right < vw * 0.16 && r.top > vh * 0.15) n++;
-      });
-      return n >= 3;
-    }
-    function findGuideClose() {
-      var vw = innerWidth, vh = innerHeight;
-      var btns = document.querySelectorAll('button,[role="button"]');
-      for (var i = 0; i < btns.length; i++) {
-        var b = btns[i];
-        if (b.closest('.cpm,.cpm-backdrop,.cp-gpu')) continue;
-        var r = b.getBoundingClientRect();
-        if (!(r.width > 0 && r.width < 90 && r.height < 90 && r.right > vw * 0.85 && r.top < vh * 0.2)) continue;
-        var ov = overlayOf(b, vw, vh);
-        if (ov && visible(ov) && hasLeftRail(ov, vw, vh)) return b;
-      }
-      return null;
-    }
-    // Hidden at once (no flicker) and closed once. If the site puts it straight back, it just
-    // stays hidden instead of being closed again, so the screen never flips between the two.
-    var closedAt = 0;
-    function check() {
-      if (lastStreaming) return; // in a game the Xbox button opens the stream's own menu
-      var b = findGuideClose();
-      if (!b) return;
-      var ov = overlayOf(b, innerWidth, innerHeight);
-      if (ov && !ov.hasAttribute('data-cp-hidden')) {
-        ov.setAttribute('data-cp-hidden', '1');
-        ov.style.setProperty('display', 'none', 'important');
-        try { if (ov.contains(document.activeElement)) document.activeElement.blur(); } catch (e) {}
-      }
-      if (Date.now() - closedAt > 5000) { closedAt = Date.now(); try { b.click(); } catch (e) {} }
-    }
-    var pending = false;
-    var mo = new MutationObserver(function () {
-      if (pending) return;
-      pending = true;
-      requestAnimationFrame(function () { pending = false; check(); });
-    });
-    (function watch() {
-      if (!document.documentElement) return setTimeout(watch, 30);
-      mo.observe(document.documentElement, { childList: true, subtree: true });
-    })();
-    setInterval(check, 500);
-    window.addEventListener('focus', function () { setTimeout(check, 200); });
-    window.__cpGuideCheck = check;
-  })();
 
   // Settings changed in App settings arrive here and apply in place, without reloading.
   window.__cpApplyCfg = function (o) {
@@ -224,7 +158,6 @@
   };
   window.__cpBackground = function (away) {
     bgAway = away;
-    if (!away && window.__cpGuideCheck) { setTimeout(__cpGuideCheck, 150); setTimeout(__cpGuideCheck, 800); }
     if (C.bgAudio) return;
     try { if (boost.ctx) { if (away) boost.ctx.suspend(); else boost.ctx.resume(); } } catch (e) {}
     if (away) {
@@ -246,7 +179,7 @@
       if (!localStorage.getItem('cp.stockUi.v1')) {
         var cur = JSON.parse(localStorage.getItem('BetterXcloud') || '{}');
         var stock = {
-          'ui.layout': 'normal',
+          'ui.layout': 'tv',
           'ui.theme': 'default',
           'ui.hideSections': [],
           'ui.gameCard.waitTime.show': false,
@@ -269,11 +202,11 @@
     // One-time: the engine forces the regular website layout (its "default" lets the site
     // pick the older TV layout on handhelds).
     try {
-      if (!localStorage.getItem('cp.stockUi.v3')) {
+      if (!localStorage.getItem('cp.stockUi.v4')) {
         var g3 = JSON.parse(localStorage.getItem('BetterXcloud') || '{}');
-        g3['ui.layout'] = 'normal';
+        g3['ui.layout'] = 'tv';
         localStorage.setItem('BetterXcloud', JSON.stringify(g3));
-        localStorage.setItem('cp.stockUi.v3', '1');
+        localStorage.setItem('cp.stockUi.v4', '1');
       }
     } catch (e) {}
     // One-time: no engine touch overlay (the app has its own, shown only without a controller)
@@ -1182,9 +1115,6 @@
         for (var b = 0; b < 17; b++) {
           var srcB = swap ? ({ 0: 1, 1: 0, 2: 3, 3: 2 })[b] : undefined;
           var val = p.b[srcB != null ? srcB : b] || 0, btn = o.buttons[b];
-          // Xbox button: only in a game (opens the stream menu). On the website it opens the
-          // Guide panel, which looks like the old layout, so it's kept away from the site there.
-          if (b === 16 && !lastStreaming) val = 0;
           btn.value = val;
           btn.pressed = btn.touched = val > 0.12;
         }
