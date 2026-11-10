@@ -181,12 +181,20 @@
       }
       return null;
     }
-    var lastTry = 0;
+    // Hidden at once (no flicker) and closed once. If the site puts it straight back, it just
+    // stays hidden instead of being closed again, so the screen never flips between the two.
+    var closedAt = 0;
     function check() {
       if (lastStreaming) return; // in a game the Xbox button opens the stream's own menu
-      if (Date.now() - lastTry < 400) return;
       var b = findGuideClose();
-      if (b) { lastTry = Date.now(); b.click(); }
+      if (!b) return;
+      var ov = overlayOf(b, innerWidth, innerHeight);
+      if (ov && !ov.hasAttribute('data-cp-hidden')) {
+        ov.setAttribute('data-cp-hidden', '1');
+        ov.style.setProperty('display', 'none', 'important');
+        try { if (ov.contains(document.activeElement)) document.activeElement.blur(); } catch (e) {}
+      }
+      if (Date.now() - closedAt > 5000) { closedAt = Date.now(); try { b.click(); } catch (e) {} }
     }
     var pending = false;
     var mo = new MutationObserver(function () {
@@ -1174,6 +1182,9 @@
         for (var b = 0; b < 17; b++) {
           var srcB = swap ? ({ 0: 1, 1: 0, 2: 3, 3: 2 })[b] : undefined;
           var val = p.b[srcB != null ? srcB : b] || 0, btn = o.buttons[b];
+          // Xbox button: only in a game (opens the stream menu). On the website it opens the
+          // Guide panel, which looks like the old layout, so it's kept away from the site there.
+          if (b === 16 && !lastStreaming) val = 0;
           btn.value = val;
           btn.pressed = btn.touched = val > 0.12;
         }
