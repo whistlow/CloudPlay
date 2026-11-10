@@ -25,42 +25,6 @@
   var ACTIVE = !PURE_RP;
   if (PURE_RP) BX = false;
 
-  // Always Xbox's new console-style layout (Home / Library / Search across the top, Remote
-  // Play button, Guide on the Xbox button). The site otherwise falls back to the older
-  // "Cloud Gaming" layout on some devices.
-  // Works by rewriting the one choice in the site's code as its modules load.
-  (function () {
-    var TV = '?"tv":"default"';
-    var nativeBind = Function.prototype.bind;
-    function patch(item) {
-      try {
-        var mods = item && item[1];
-        if (!mods) return;
-        for (var id in mods) {
-          var f = mods[id];
-          if (typeof f !== 'function') continue;
-          var src = Function.prototype.toString.call(f);
-          if (src.indexOf(TV) < 0) continue;
-          src = src.split(TV).join('?"tv":"tv"');
-          var body = src.replace(/^\d+/, '');
-          var tries = [body, 'function ' + body.replace(/^function\s*/, '')];
-          for (var i = 0; i < tries.length; i++) {
-            try { var g = (0, eval)('(' + tries[i] + ')'); if (typeof g === 'function') { mods[id] = g; break; } } catch (e) {}
-          }
-        }
-      } catch (e) {}
-    }
-    Function.prototype.bind = function () {
-      var a = arguments;
-      if (this.name && this.name.length <= 2 && a.length === 2 && a[0] === null &&
-          (a[1] === 0 || typeof a[1] === 'function')) {
-        if (typeof a[1] === 'function') Function.prototype.bind = nativeBind;
-        var org = this;
-        return nativeBind.apply(function (x, item) { patch(item); return org(x, item); }, a);
-      }
-      return nativeBind.apply(this, a);
-    };
-  })();
 
   // The site switches pages without reloading; crossing into or out of Remote Play does a
   // full load so each side starts clean.
@@ -179,7 +143,7 @@
       if (!localStorage.getItem('cp.stockUi.v1')) {
         var cur = JSON.parse(localStorage.getItem('BetterXcloud') || '{}');
         var stock = {
-          'ui.layout': 'tv',
+          'ui.layout': 'default',
           'ui.theme': 'default',
           'ui.hideSections': [],
           'ui.gameCard.waitTime.show': false,
@@ -202,11 +166,11 @@
     // One-time: the engine forces the regular website layout (its "default" lets the site
     // pick the older TV layout on handhelds).
     try {
-      if (!localStorage.getItem('cp.stockUi.v4')) {
+      if (!localStorage.getItem('cp.stockUi.v5')) {
         var g3 = JSON.parse(localStorage.getItem('BetterXcloud') || '{}');
-        g3['ui.layout'] = 'tv';
+        g3['ui.layout'] = 'default';
         localStorage.setItem('BetterXcloud', JSON.stringify(g3));
-        localStorage.setItem('cp.stockUi.v4', '1');
+        localStorage.setItem('cp.stockUi.v5', '1');
       }
     } catch (e) {}
     // One-time: no engine touch overlay (the app has its own, shown only without a controller)
@@ -684,7 +648,7 @@
       (filters.length ? 'filter:' + filters.join(' ') + ' !important;' : '') + '}' +
       'html,body{overscroll-behavior:none;}' +
       // the strip of Microsoft links at the bottom of pages (language, privacy, terms...)
-      'footer,#uhf-footer,[class*="Footer-module__"],[class*="footer-module__"]{display:none !important}';
+      'footer,#uhf-footer{display:none !important}';
     (document.head || document.documentElement).appendChild(style);
     if (gpu) gpu.settingsChanged = true;
   }
