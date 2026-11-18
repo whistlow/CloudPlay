@@ -220,4 +220,14 @@
         <item>light</item>
         <item>vivid</item>
     </string-array>
+    <string-array name="frame_gen_entries">
+        <item>On (motion)</item>
+        <item>On (blend, lighter)</item>
+        <item>Off</item>
+    </string-array>
+    <string-array name="frame_gen_values">
+        <item>motion</item>
+        <item>blend</item>
+        <item>off</item>
+    </string-array>
 </resources>

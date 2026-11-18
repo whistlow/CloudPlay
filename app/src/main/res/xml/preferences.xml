@@ -92,6 +92,14 @@
 
     <PreferenceCategory app:title="Remote Play" app:iconSpaceReserved="false">
         <ListPreference
+            app:key="frame_gen"
+            app:title="Frame generation (30 to 60 fps)"
+            app:entries="@array/frame_gen_entries"
+            app:entryValues="@array/frame_gen_values"
+            app:defaultValue="motion"
+            app:useSimpleSummaryProvider="true"
+            app:iconSpaceReserved="false" />
+        <ListPreference
             app:key="rp_upscaler"
             app:title="Upscaler"
             app:entries="@array/rp_ups_entries"

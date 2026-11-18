@@ -726,6 +726,60 @@
 
   // Remote Play picture pipeline. "fsr": video -> EASU at screen resolution -> RCAS + colour.
   // "rcas": video -> RCAS + colour at the stream's own resolution. Runs once per decoded frame.
+  // Picture settings for the GPU pipeline: Remote Play has its own; cloud games use the
+  // Clarity settings (sharpness, saturation, contrast, brightness).
+  function picMode() {
+    if (PURE_RP) return rpGpuMode() || 'rcas';
+    return 'rcas';
+  }
+  function picSharp() {
+    if (PURE_RP) return rpSharpAmt();
+    return Math.min(1, (parseInt(C.sharpness, 10) || 0) / 10) * 0.9;
+  }
+  function picColor() {
+    if (PURE_RP) return rpColor();
+    return [(C.saturation || 100) / 100, (C.contrast || 100) / 100, (C.brightness || 100) / 100];
+  }
+  // Frame generation: 'off', 'motion' (motion-compensated) or 'blend'.
+  function frameGen() {
+    if (bxOn()) return 'off';
+    var v = C.frameGen || 'motion';
+    return v === 'motion' || v === 'blend' ? v : 'off';
+  }
+
+  // Frame generation shaders.
+  // DIFF: how different the new frame is from the last new one (8x8 grid, read back).
+  var DIFF_FS = '#version 300 es\nprecision highp float;out vec4 o;uniform sampler2D A;uniform sampler2D B;' +
+    'void main(){vec2 cell=floor(gl_FragCoord.xy);float s=0.0;' +
+    'for(int i=0;i<4;i++)for(int j=0;j<4;j++){vec2 uv=(cell+(vec2(float(i),float(j))+0.5)/4.0)/8.0;' +
+    's+=abs(dot(textureLod(A,uv,3.0).rgb-textureLod(B,uv,3.0).rgb,vec3(0.299,0.587,0.114)));}' +
+    'o=vec4(clamp(s/16.0*32.0,0.0,1.0),0.0,0.0,1.0);}';
+  // ME: block motion search from the previous frame P to the new frame N, coarse (1/16 size,
+  // +/-64 px) then fine (1/4 size). Stored as pixels / 192 + 0.5.
+  var ME_FS = '#version 300 es\nprecision highp float;in vec2 uv;out vec4 o;uniform sampler2D P;uniform sampler2D N;uniform vec2 inSize;' +
+    'float lum(sampler2D s,vec2 q,float l){return dot(textureLod(s,q,l).rgb,vec3(0.299,0.587,0.114));}' +
+    'void main(){vec2 c=uv;vec2 p4=16.0/inSize;vec2 p2=4.0/inSize;float a[9];float b[9];' +
+    'for(int k=0;k<9;k++){vec2 t=vec2(float(k%3-1),float(k/3-1));a[k]=lum(P,c+t*p4,4.0);b[k]=lum(P,c+t*p2,2.0);}' +
+    'float best=1e9;vec2 bd=vec2(0.0);' +
+    'for(int y=-4;y<=4;y++)for(int x=-4;x<=4;x++){vec2 d=vec2(float(x),float(y));float s=0.004*length(d);' +
+    'for(int k=0;k<9;k++){vec2 t=vec2(float(k%3-1),float(k/3-1));s+=abs(a[k]-lum(N,c+(t+d)*p4,4.0));}' +
+    'if(s<best){best=s;bd=d;}}' +
+    'vec2 base=bd*16.0;float best2=1e9;vec2 bd2=vec2(0.0);' +
+    'for(int y=-3;y<=3;y++)for(int x=-3;x<=3;x++){vec2 d=vec2(float(x),float(y));float s=0.002*length(d);' +
+    'vec2 off=base/inSize+d*p2;' +
+    'for(int k=0;k<9;k++){vec2 t=vec2(float(k%3-1),float(k/3-1));s+=abs(b[k]-lum(N,c+t*p2+off,2.0));}' +
+    'if(s<best2){best2=s;bd2=d;}}' +
+    'vec2 mv=base+bd2*4.0;o=vec4(clamp(mv/192.0+128.0/255.0,0.0,1.0),0.0,1.0);}';
+  // INTERP: the in-between picture at time t (0 = previous frame, 1 = new frame).
+  var INTERP_FS = '#version 300 es\nprecision highp float;in vec2 uv;out vec4 o;uniform sampler2D P;uniform sampler2D N;' +
+    'uniform sampler2D M;uniform float t;uniform float useM;uniform vec2 inSize;' +
+    'void main(){vec2 v=useM>0.5?(texture(M,uv).rg-128.0/255.0)*192.0/inSize:vec2(0.0);' +
+    'vec3 a=textureLod(P,uv-t*v,0.0).rgb;vec3 b=textureLod(N,uv+(1.0-t)*v,0.0).rgb;' +
+    'vec3 r=mix(a,b,t);' +
+    // where the two disagree (things appearing/disappearing), use the nearer real frame
+    'float miss=length(a-b);if(useM>0.5&&miss>0.3)r=t<0.5?a:b;' +
+    'o=vec4(r,1.0);}';
+
   function rpGpuStart(video) {
     var canvas = document.createElement('canvas');
     canvas.className = 'cp-gpu';
@@ -747,27 +801,47 @@
       var u = {}; names.forEach(function (n) { u[n] = gl.getUniformLocation(pr, n); });
       return { p: pr, u: u };
     }
-    // RCAS straight from the video (flipped, cropped) or from the upscaled image.
     var pEasu = prog(GPU_VS, EASU_FS, ['crop', 'inSize']);
     var pRcasVid = prog(GPU_VS, RCAS_FS, ['crop', 'px', 'sharp', 'col']);
     var pRcasFbo = prog(VS_PLAIN, RCAS_FS, ['px', 'sharp', 'col']);
+    var fgOk = true, pDiff, pMe, pInterp;
+    try {
+      pDiff = prog(VS_PLAIN, DIFF_FS, ['A', 'B']);
+      pMe = prog(VS_PLAIN, ME_FS, ['P', 'N', 'inSize']);
+      pInterp = prog(VS_PLAIN, INTERP_FS, ['P', 'N', 'M', 't', 'useM', 'inSize']);
+    } catch (e) { fgOk = false; }
     var buf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    function mkTex() {
+    function mkTex(mip) {
       var tx = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, tx);
-      [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER].forEach(function (k) { gl.texParameteri(gl.TEXTURE_2D, k, gl.LINEAR); });
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, mip ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T].forEach(function (k) { gl.texParameteri(gl.TEXTURE_2D, k, gl.CLAMP_TO_EDGE); });
       return tx;
     }
-    var vidTex = mkTex(), upTex = mkTex(), fbo = gl.createFramebuffer(), upW = 0, upH = 0;
+    function mkTarget(tx, w, h) {
+      gl.bindTexture(gl.TEXTURE_2D, tx);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      var f = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tx, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      return f;
+    }
+    // Frames: three rotating video textures (with mipmaps for the motion search).
+    var frames = [mkTex(true), mkTex(true), mkTex(true)];
+    var iP = 0, iN = 1, iIn = 2, latest = 1, haveN = false;
+    var upTex = mkTex(false), fbo = gl.createFramebuffer(), upW = 0, upH = 0;
+    var midTex = mkTex(false), midFbo = null, motTex = mkTex(false), motFbo = null, fW = 0, fH = 0;
+    var diffTex = mkTex(false), diffFbo = mkTarget(diffTex, 8, 8), diffPx = new Uint8Array(256);
 
-    var g = { video: video, canvas: canvas, gl: gl, handle: 0, alive: true, settingsChanged: true, rp: true };
+    var g = { video: video, canvas: canvas, gl: gl, handle: 0, raf: 0, alive: true, settingsChanged: true, rp: true, fg: 'off' };
     video.insertAdjacentElement('afterend', canvas);
-    var mode = '', outW = 0, outH = 0, crop = [0, 0, 1, 1], sharp = 0, col = [1, 1, 1];
+    var mode = '', outW = 0, outH = 0, crop = [0, 0, 1, 1], sharp = 0, col = [1, 1, 1], fg = 'off';
 
     function layout() {
       var vw = video.videoWidth, vh = video.videoHeight;
@@ -785,8 +859,9 @@
       st.left = (video.offsetLeft + (ew - cw) / 2) + 'px';
       st.top = (video.offsetTop + (eh - ch) / 2) + 'px';
       st.width = cw + 'px'; st.height = ch + 'px';
-      mode = rpGpuMode();
-      sharp = rpSharpAmt(); col = rpColor();
+      mode = picMode();
+      sharp = picSharp(); col = picColor();
+      fg = fgOk ? frameGen() : 'off';
       var dpr = window.devicePixelRatio || 1;
       // Screen pixels, capped at 1440p. Only upscale when the screen has more pixels than the stream.
       var sw = Math.round(Math.min(cw * dpr, 2560)), shh = Math.round(Math.min(ch * dpr, 1440));
@@ -801,58 +876,163 @@
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, upTex, 0);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       }
-      g.mode = mode; g.out = outW + 'x' + outH;
+      if (fg !== 'off' && (fW !== vw || fH !== vh)) {
+        fW = vw; fH = vh;
+        midFbo = mkTarget(midTex, vw, vh);
+        motFbo = mkTarget(motTex, Math.ceil(vw / 8), Math.ceil(vh / 8));
+        haveN = false;
+      }
+      g.mode = mode; g.out = outW + 'x' + outH; g.fg = fg;
     }
     g.layout = layout;
 
-    function draw() {
+    // Final stage: source texture (laid out like the video) -> [EASU] -> RCAS + colour -> screen.
+    function present(src) {
+      var vw = video.videoWidth, vh = video.videoHeight;
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, src);
+      if (mode === 'fsr') {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+        gl.viewport(0, 0, outW, outH);
+        gl.useProgram(pEasu.p);
+        gl.uniform4f(pEasu.u.crop, crop[0], crop[1], crop[2], crop[3]);
+        gl.uniform2f(pEasu.u.inSize, vw, vh);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.bindTexture(gl.TEXTURE_2D, upTex);
+        gl.viewport(0, 0, outW, outH);
+        gl.useProgram(pRcasFbo.p);
+        gl.uniform2f(pRcasFbo.u.px, 1 / outW, 1 / outH);
+        gl.uniform1f(pRcasFbo.u.sharp, sharp);
+        gl.uniform3f(pRcasFbo.u.col, col[0], col[1], col[2]);
+      } else {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, outW, outH);
+        gl.useProgram(pRcasVid.p);
+        gl.uniform4f(pRcasVid.u.crop, crop[0], crop[1], crop[2], crop[3]);
+        gl.uniform2f(pRcasVid.u.px, 1 / vw, 1 / vh);
+        gl.uniform1f(pRcasVid.u.sharp, sharp);
+        gl.uniform3f(pRcasVid.u.col, col[0], col[1], col[2]);
+      }
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+    function bind2(unit, tx) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tx); }
+
+    // Frame generation state. Streams run at 60 fps even when the game runs at 30, so every
+    // game frame arrives twice. New (different) frames are spotted, the motion between the
+    // last two is measured, and the in-between picture is drawn on the screen's own refresh.
+    var tNew = 0, gap = 0, rate = 0, lastIn = 0, engaged = false, dirty = false;
+
+    function ingest() {
+      var now = performance.now();
+      if (lastIn) { var di = now - lastIn; rate = rate ? rate * 0.9 + di * 0.1 : di; }
+      lastIn = now;
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, frames[iIn]);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+      gl.generateMipmap(gl.TEXTURE_2D);
+      var isNew = true;
+      if (haveN) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, diffFbo);
+        gl.viewport(0, 0, 8, 8);
+        gl.useProgram(pDiff.p);
+        bind2(0, frames[iIn]); bind2(1, frames[iN]);
+        gl.uniform1i(pDiff.u.A, 0); gl.uniform1i(pDiff.u.B, 1);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        gl.readPixels(0, 0, 8, 8, gl.RGBA, gl.UNSIGNED_BYTE, diffPx);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        var sum = 0, mx = 0;
+        for (var i = 0; i < 64; i++) { var d = diffPx[i * 4]; sum += d; if (d > mx) mx = d; }
+        // mean > ~0.3/255 or any cell > ~2/255 (values are x32)
+        isNew = sum / 64 > 9 || mx > 64;
+      }
+      if (isNew) {
+        var tmp = iP; iP = iN; iN = iIn; iIn = tmp;
+        if (haveN && tNew) { var dg = now - tNew; gap = gap ? gap * 0.8 + dg * 0.2 : dg; }
+        tNew = now;
+        latest = iN;
+        if (haveN && fg === 'motion') {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, motFbo);
+          gl.viewport(0, 0, Math.ceil(fW / 8), Math.ceil(fH / 8));
+          gl.useProgram(pMe.p);
+          bind2(0, frames[iP]); bind2(1, frames[iN]);
+          gl.uniform1i(pMe.u.P, 0); gl.uniform1i(pMe.u.N, 1);
+          gl.uniform2f(pMe.u.inSize, fW, fH);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        }
+        haveN = true;
+      } else {
+        latest = iIn; // same picture; keep the freshest copy for when it isn't generating
+      }
+      // Generate only for low frame-rate games (about 20-40 fps) on a faster stream.
+      var want = gap > 24 && gap < 55 && rate > 0 && rate < gap * 0.75;
+      engaged = engaged ? (gap > 21 && gap < 60 && rate < gap * 0.8) : want;
+      g.engaged = engaged; g.gapMs = gap; g.rateMs = rate;
+      dirty = true;
+    }
+
+    function frameAt(now) {
+      if (!engaged || !haveN) return frames[latest];
+      var t = Math.max(0, Math.min(1, (now - tNew) / gap));
+      if (t >= 0.999) return frames[iN];
+      if (t <= 0.001) return frames[iP];
+      gl.bindFramebuffer(gl.FRAMEBUFFER, midFbo);
+      gl.viewport(0, 0, fW, fH);
+      gl.useProgram(pInterp.p);
+      bind2(0, frames[iP]); bind2(1, frames[iN]); bind2(2, motTex);
+      gl.uniform1i(pInterp.u.P, 0); gl.uniform1i(pInterp.u.N, 1); gl.uniform1i(pInterp.u.M, 2);
+      gl.uniform1f(pInterp.u.t, t);
+      gl.uniform1f(pInterp.u.useM, fg === 'motion' ? 1 : 0);
+      gl.uniform2f(pInterp.u.inSize, fW, fH);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.activeTexture(gl.TEXTURE0);
+      return midTex;
+    }
+
+    // Without frame generation: draw each video frame as it arrives (lowest delay).
+    function onVideo() {
       if (!g.alive) return;
       if (video.readyState >= 2) {
         if (g.settingsChanged) { g.settingsChanged = false; layout(); }
-        var vw = video.videoWidth, vh = video.videoHeight;
         try {
-          gl.activeTexture(gl.TEXTURE0);
-          gl.bindTexture(gl.TEXTURE_2D, vidTex);
-          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
-          if (mode === 'fsr') {
-            gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-            gl.viewport(0, 0, outW, outH);
-            gl.useProgram(pEasu.p);
-            gl.uniform4f(pEasu.u.crop, crop[0], crop[1], crop[2], crop[3]);
-            gl.uniform2f(pEasu.u.inSize, vw, vh);
-            gl.drawArrays(gl.TRIANGLES, 0, 6);
-            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-            gl.bindTexture(gl.TEXTURE_2D, upTex);
-            gl.viewport(0, 0, outW, outH);
-            gl.useProgram(pRcasFbo.p);
-            gl.uniform2f(pRcasFbo.u.px, 1 / outW, 1 / outH);
-            gl.uniform1f(pRcasFbo.u.sharp, sharp);
-            gl.uniform3f(pRcasFbo.u.col, col[0], col[1], col[2]);
+          if (fg === 'off') {
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, frames[0]);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+            present(frames[0]);
           } else {
-            gl.viewport(0, 0, outW, outH);
-            gl.useProgram(pRcasVid.p);
-            gl.uniform4f(pRcasVid.u.crop, crop[0], crop[1], crop[2], crop[3]);
-            gl.uniform2f(pRcasVid.u.px, 1 / vw, 1 / vh);
-            gl.uniform1f(pRcasVid.u.sharp, sharp);
-            gl.uniform3f(pRcasVid.u.col, col[0], col[1], col[2]);
+            ingest();
+            if (!engaged) { dirty = false; present(frames[latest]); } // nothing to generate: show it now
           }
-          gl.drawArrays(gl.TRIANGLES, 0, 6);
         } catch (e) {}
       }
       schedule();
     }
+    // With frame generation: draw on every screen refresh.
+    function onRefresh(now) {
+      if (!g.alive) return;
+      g.raf = requestAnimationFrame(onRefresh);
+      if (fg === 'off' || !haveN) return;
+      if (!engaged && !dirty) return;
+      dirty = false;
+      try { present(frameAt(now)); } catch (e) {}
+    }
     function schedule() {
       if (!g.alive) return;
-      if (video.requestVideoFrameCallback) g.handle = video.requestVideoFrameCallback(draw);
-      else g.handle = requestAnimationFrame(draw);
+      if (video.requestVideoFrameCallback) g.handle = video.requestVideoFrameCallback(onVideo);
+      else g.handle = requestAnimationFrame(onVideo);
     }
     g.stop = function () {
       g.alive = false;
       try { if (video.cancelVideoFrameCallback) video.cancelVideoFrameCallback(g.handle); else cancelAnimationFrame(g.handle); } catch (e) {}
+      try { cancelAnimationFrame(g.raf); } catch (e) {}
       canvas.remove();
       try { var ext = gl.getExtension('WEBGL_lose_context'); if (ext) ext.loseContext(); } catch (e) {}
     };
     schedule();
+    g.raf = requestAnimationFrame(onRefresh);
     return g;
   }
 
@@ -960,10 +1140,12 @@
 
   // Attach to the playing stream (and re-attach when it changes); follow size changes.
   setInterval(function () {
-    var want = gpuLevel() > 0 && gpuSupported() && !!lastStreaming;
+    var fgOn = frameGen() !== 'off';
+    var want = (gpuLevel() > 0 || fgOn) && gpuSupported() && !!lastStreaming;
     var v = want ? mainVideo() : null;
-    if (gpu && (!want || gpu.video !== v || !gpu.canvas.isConnected)) { gpu.stop(); gpu = null; }
-    if (!gpu && v) { try { gpu = PURE_RP ? rpGpuStart(v) : gpuStart(v); } catch (e) { gpu = null; gpuOk = false; applyVideoStyle(); } }
+    var full = PURE_RP || fgOn; // the full pipeline (upscaler, frame generation)
+    if (gpu && (!want || gpu.video !== v || !gpu.canvas.isConnected || !!gpu.rp !== full)) { gpu.stop(); gpu = null; }
+    if (!gpu && v) { try { gpu = full ? rpGpuStart(v) : gpuStart(v); } catch (e) { gpu = null; gpuOk = false; applyVideoStyle(); } }
     if (gpu) gpu.layout();
   }, 1000);
   window.addEventListener('resize', function () { if (gpu) gpu.settingsChanged = true; });
@@ -1307,6 +1489,8 @@
   function nameOf(list, cur) { return (list.filter(function (x) { return x[0] === cur; })[0] || list[0])[1]; }
   function savePref(key, value) { try { native() && native().setPref(key, String(value)); } catch (e) {} }
 
+  var FG_OPTS = [['motion', 'On (motion)'], ['blend', 'On (blend, lighter)'], ['off', 'Off']];
+  var FG_SUB = 'Turns 30 fps games into 60 fps (adds about one frame of delay)';
   var RP_UPS = [['fsr', 'FSR 1.0'], ['sharpen', 'Sharpen only'], ['off', 'Off']];
   var RP_SHARP = [['off', 'Off'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']];
   var RP_SMOOTH = [['lowest', 'Lowest delay'], ['slight', 'Slight delay (smooth)'], ['smooth', 'Smoother'], ['extra', 'Smoothest'], ['auto', 'Website default']];
@@ -1320,6 +1504,11 @@
       } },
       { label: 'Stream stats', detail: C.showStats ? 'On' : 'Off', go: function () {
         C.showStats = !C.showStats; savePref('show_stats', C.showStats); render('remote', focusIdx);
+      } },
+      { label: 'Frame generation', sub: FG_SUB,
+        detail: nameOf(FG_OPTS, C.frameGen || 'motion'), go: function () {
+        var n = nextOf(FG_OPTS, C.frameGen || 'motion');
+        C.frameGen = n[0]; savePref('frame_gen', n[0]); applyVideoStyle(); render('remote', focusIdx);
       } },
       { label: 'Upscaler', sub: 'FSR 1.0 upscales to your screen\u2019s full resolution',
         detail: nameOf(RP_UPS, C.rpUpscaler || 'fsr'), go: function () {
@@ -1516,6 +1705,7 @@
       choice('Max bitrate', 'max_bitrate', 'maxBitrate', [[0, 'Unlimited'], [40000, '40 Mbps'], [30000, '30 Mbps'], [20000, '20 Mbps'], [15000, '15 Mbps'], [10000, '10 Mbps'], [8000, '8 Mbps'], [5000, '5 Mbps'], [3000, '3 Mbps']], { sub: NEXT, reconnect: true }),
       choice('Server region', 'region', 'region', regionOpts(), { sub: NEXT, reconnect: true }),
       { header: 'Picture (changes instantly)' },
+      choice('Frame generation', 'frame_gen', 'frameGen', FG_OPTS, { sub: FG_SUB, live: function () { applyVideoStyle(); } }),
       choice('Screen fit', 'video_fit', 'videoFit', [['contain', 'Fit'], ['cover', 'Zoom to fill'], ['fill', 'Stretch']], { live: function () { applyVideoStyle(); } }),
       stepper('Sharpness', 'sharpness', 'sharpness', 0, 10, 1, '', { fmt: function (v) { return v ? String(v) : 'Off'; }, live: livePicture }),
       choice('Sharpen style', 'clarity_algo', 'clarityAlgo', [['sharpen', 'Crisp'], ['unsharp', 'Natural']], { live: livePicture }),
@@ -2429,7 +2619,8 @@
       el.textContent = (v.frameWidth || '?') + 'x' + (v.frameHeight || '?') + ' ' + codec + '  ' +
         Math.round(v.framesPerSecond || 0) + ' fps\n' +
         'Ping ' + ping + '  ' + mbps + ' Mbps  Loss ' + loss + '%  Decode ' + dec + ' ms' +
-        (route ? '\nRoute: ' + ({ home: 'Home network (direct)', internet: 'Internet (direct)', relay: 'Xbox relay' })[route.kind] : '');
+        (route ? '\nRoute: ' + ({ home: 'Home network (direct)', internet: 'Internet (direct)', relay: 'Xbox relay' })[route.kind] : '') +
+        (gpu && gpu.fg && gpu.fg !== 'off' ? '\nFrame generation: ' + (gpu.engaged ? 'on (game ~' + Math.round(1000 / (gpu.gapMs || 33)) + ' fps \u2192 doubled)' : 'standing by (game already smooth)') : '');
       el.style.display = 'block';
     }, 1000);
   }
